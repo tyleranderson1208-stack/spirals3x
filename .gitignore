@@ -1,0 +1,7 @@
+node_modules/
+.env
+*.log
+data/
+tokens.json
+racestats.json
+settings.json

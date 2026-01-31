@@ -1,0 +1,14 @@
+{
+  "name": "rustyreds-rhib-race-bot",
+  "version": "1.0.0",
+  "description": "RUSTYREDS 3X RHIB race Discord bot",
+  "main": "bot.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5"
+  }
+}
