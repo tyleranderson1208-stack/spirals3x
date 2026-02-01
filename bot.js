@@ -1227,6 +1227,7 @@ function formatTop(arr, field, label) {
     .join("\n");
 }
 /* ================== COMMANDS ================== */
+const TICKETS = initTicketSystem();
 const colourChoices = COLOURS.map((c) => ({ name: `${c.name} ${c.label}`, value: c.key }));
 const tierChoices = [
   { name: `${TIERS.low.emoji} Low`, value: "low" },
@@ -1305,7 +1306,7 @@ const commands = [
     .addSubcommand((sc) => sc.setName("season-info").setDescription("Show current season info (admin)"))
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 ].map((c) => c.toJSON());
-
+commands.push(...TICKETS.commands);
 // ================== DEPLOY ==================
 async function deployCommandsServerOnly() {
   const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
@@ -1345,6 +1346,9 @@ client.once("ready", async () => {
 client.on("interactionCreate", async (interaction) => {
   try {
     if (!interaction.isChatInputCommand()) return;
+    // Let ticket system handle /ticketpanel + button clicks
+    const handledByTickets = await TICKETS.handleInteraction(interaction);
+    if (handledByTickets) return;
 
     // permission sanity check for visible commands
     if (interaction.channel && interaction.guild) {

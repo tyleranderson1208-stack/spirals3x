@@ -1018,3 +1018,319 @@ function initTicketSystem({ brand, dataDir }) {
 }
 
 module.exports = { initTicketSystem };
+
+const fs = require("fs");
+const path = require("path");
+const {
+  SlashCommandBuilder,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  PermissionFlagsBits,
+  ChannelType,
+} = require("discord.js");
+
+// ================== BRAND (match your neon theme) ==================
+const TICKET_BRAND = "🌀 SPIRALS 3X";
+const COLOR_CYAN = 0x00e5ff;   // neon cyan
+const COLOR_PURPLE = 0xb000ff; // neon purple
+
+// ================== DATA ==================
+const DATA_DIR = path.join(__dirname, "data");
+const TICKETS_FILE = path.join(DATA_DIR, "tickets.json");
+
+function ensureDir(dir) {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+function loadJsonSafe(file, fallback) {
+  if (!fs.existsSync(file)) return fallback;
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+function saveJson(file, obj) {
+  ensureDir(path.dirname(file));
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), "utf8");
+  fs.renameSync(tmp, file);
+}
+
+const db = loadJsonSafe(TICKETS_FILE, { tickets: {} }); // ticketId -> ticket
+function saveDb() {
+  saveJson(TICKETS_FILE, db);
+}
+
+function makeId() {
+  return `t_${Date.now().toString(36)}_${Math.floor(Math.random() * 9999)}`;
+}
+
+// ================== COMMANDS ==================
+function getTicketCommands() {
+  return [
+    new SlashCommandBuilder()
+      .setName("ticketpanel")
+      .setDescription("Post the SPIRALS 3X support ticket panel.")
+      .addChannelOption((o) =>
+        o
+          .setName("channel")
+          .setDescription("Where to post the panel (defaults to current channel)")
+          .setRequired(false)
+      )
+      .addChannelOption((o) =>
+        o
+          .setName("category")
+          .setDescription("Category to create ticket channels under (recommended)")
+          .setRequired(false)
+      )
+      .addRoleOption((o) =>
+        o
+          .setName("support_role_1")
+          .setDescription("Support role that can view tickets")
+          .setRequired(true)
+      )
+      .addRoleOption((o) =>
+        o
+          .setName("support_role_2")
+          .setDescription("Optional 2nd support role")
+          .setRequired(false)
+      )
+      .addRoleOption((o) =>
+        o
+          .setName("support_role_3")
+          .setDescription("Optional 3rd support role")
+          .setRequired(false)
+      )
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+  ].map((c) => c.toJSON());
+}
+
+// ================== PANEL UI ==================
+function panelEmbed() {
+  return new EmbedBuilder()
+    .setColor(COLOR_PURPLE)
+    .setTitle(`${TICKET_BRAND} • Support`)
+    .setDescription(
+      [
+        "Tap a button to open a private support ticket.",
+        "",
+        "🛒 **Shop Issue** — purchases, items, rewards, store problems",
+        "🚫 **Report Player** — cheating, abuse, rule breaks",
+        "🧩 **General Support** — anything else",
+        "",
+        "_Tickets open as a private channel with staff._",
+      ].join("\n")
+    );
+}
+
+function panelButtons() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("ticket_open_shop").setLabel("Shop Issue").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("ticket_open_report").setLabel("Report Player").setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId("ticket_open_general").setLabel("General Support").setStyle(ButtonStyle.Secondary)
+  );
+}
+
+function ticketStaffButtons(ticketId, state) {
+  const row = new ActionRowBuilder();
+
+  row.addComponents(
+    new ButtonBuilder().setCustomId(`ticket_claim:${ticketId}`).setLabel("Claim").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`ticket_close:${ticketId}`).setLabel("Close").setStyle(ButtonStyle.Danger)
+  );
+
+  if (state === "CLOSED") {
+    row.addComponents(
+      new ButtonBuilder().setCustomId(`ticket_reopen:${ticketId}`).setLabel("Reopen").setStyle(ButtonStyle.Secondary)
+    );
+  }
+
+  return row;
+}
+
+// ================== CORE ==================
+function initTicketSystem() {
+  ensureDir(DATA_DIR);
+  if (!fs.existsSync(TICKETS_FILE)) saveDb();
+
+  // store latest panel config per guild (simple + effective)
+  const panelConfigByGuild = new Map(); // guildId -> { categoryId, supportRoleIds[], panelChannelId }
+
+  async function handleTicketPanelCommand(interaction) {
+    const guild = interaction.guild;
+    const channel = interaction.options.getChannel("channel") || interaction.channel;
+    const category = interaction.options.getChannel("category") || null;
+
+    const r1 = interaction.options.getRole("support_role_1", true);
+    const r2 = interaction.options.getRole("support_role_2") || null;
+    const r3 = interaction.options.getRole("support_role_3") || null;
+
+    const supportRoleIds = [r1?.id, r2?.id, r3?.id].filter(Boolean);
+
+    panelConfigByGuild.set(guild.id, {
+      panelChannelId: channel.id,
+      categoryId: category?.id || null,
+      supportRoleIds,
+    });
+
+    await channel.send({ embeds: [panelEmbed()], components: [panelButtons()] });
+    await interaction.reply({ content: `✅ Panel posted in <#${channel.id}>`, ephemeral: true });
+    return true;
+  }
+
+  function ticketTypeLabel(type) {
+    if (type === "shop") return "🛒 Shop Issue";
+    if (type === "report") return "🚫 Report Player";
+    return "🧩 General Support";
+  }
+
+  async function createTicketChannel(interaction, type) {
+    const guild = interaction.guild;
+    const user = interaction.user;
+
+    const cfg = panelConfigByGuild.get(guild.id);
+    if (!cfg) {
+      await interaction.reply({
+        content: "❌ Ticket panel not configured yet. Ask an admin to run `/ticketpanel` first.",
+        ephemeral: true,
+      });
+      return true;
+    }
+
+    // prevent duplicate open tickets per user (simple anti-abuse)
+    const existing = Object.values(db.tickets).find(
+      (t) => t.guildId === guild.id && t.userId === user.id && t.state !== "CLOSED"
+    );
+    if (existing) {
+      await interaction.reply({ content: `⚠️ You already have an open ticket: <#${existing.channelId}>`, ephemeral: true });
+      return true;
+    }
+
+    const ticketId = makeId();
+    const name = `ticket-${type}-${user.username}`.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 90);
+
+    const overwrites = [
+      { id: guild.roles.everyone.id, deny: ["ViewChannel"] },
+      { id: user.id, allow: ["ViewChannel", "SendMessages", "ReadMessageHistory", "AttachFiles", "EmbedLinks"] },
+    ];
+
+    for (const rid of cfg.supportRoleIds) {
+      overwrites.push({ id: rid, allow: ["ViewChannel", "SendMessages", "ReadMessageHistory", "ManageMessages"] });
+    }
+
+    const ch = await guild.channels.create({
+      name,
+      type: ChannelType.GuildText,
+      parent: cfg.categoryId || undefined,
+      permissionOverwrites: overwrites,
+      topic: `Ticket ${ticketId} • ${ticketTypeLabel(type)} • User ${user.id}`,
+    });
+
+    db.tickets[ticketId] = {
+      id: ticketId,
+      guildId: guild.id,
+      channelId: ch.id,
+      userId: user.id,
+      type,
+      state: "OPEN",
+      createdAt: Date.now(),
+      claimedBy: null,
+      closedAt: null,
+    };
+    saveDb();
+
+    const intro = new EmbedBuilder()
+      .setColor(COLOR_CYAN)
+      .setTitle(`${ticketTypeLabel(type)} • ${TICKET_BRAND}`)
+      .setDescription(
+        [
+          `👤 **Player:** <@${user.id}>`,
+          "",
+          "Explain the problem clearly and include any screenshots if needed.",
+          "",
+          "Staff can **Claim** then **Close** when resolved.",
+        ].join("\n")
+      );
+
+    await ch.send({ content: `<@${user.id}>`, embeds: [intro], components: [ticketStaffButtons(ticketId, "OPEN")] });
+
+    await interaction.reply({ content: `✅ Ticket created: <#${ch.id}>`, ephemeral: true });
+    return true;
+  }
+
+  async function claimTicket(interaction, ticketId) {
+    const t = db.tickets[ticketId];
+    if (!t) return interaction.reply({ content: "❌ Ticket not found.", ephemeral: true });
+
+    t.claimedBy = interaction.user.id;
+    saveDb();
+
+    await interaction.reply({ content: `✅ Claimed by <@${interaction.user.id}>`, ephemeral: false }).catch(() => {});
+    return true;
+  }
+
+  async function closeTicket(interaction, ticketId) {
+    const t = db.tickets[ticketId];
+    if (!t) return interaction.reply({ content: "❌ Ticket not found.", ephemeral: true });
+
+    t.state = "CLOSED";
+    t.closedAt = Date.now();
+    saveDb();
+
+    const e = new EmbedBuilder()
+      .setColor(COLOR_PURPLE)
+      .setTitle(`${TICKET_BRAND} • Ticket Closed`)
+      .setDescription("This ticket is now closed. Staff can reopen if needed.");
+
+    await interaction.channel.send({ embeds: [e], components: [ticketStaffButtons(ticketId, "CLOSED")] }).catch(() => {});
+    return interaction.reply({ content: "✅ Closed.", ephemeral: true });
+  }
+
+  async function reopenTicket(interaction, ticketId) {
+    const t = db.tickets[ticketId];
+    if (!t) return interaction.reply({ content: "❌ Ticket not found.", ephemeral: true });
+
+    t.state = "OPEN";
+    t.closedAt = null;
+    saveDb();
+
+    const e = new EmbedBuilder()
+      .setColor(COLOR_CYAN)
+      .setTitle(`${TICKET_BRAND} • Ticket Reopened`)
+      .setDescription("Ticket reopened. Continue the discussion below.");
+
+    await interaction.channel.send({ embeds: [e], components: [ticketStaffButtons(ticketId, "OPEN")] }).catch(() => {});
+    return interaction.reply({ content: "✅ Reopened.", ephemeral: true });
+  }
+
+  async function handleInteraction(interaction) {
+    // /ticketpanel command
+    if (interaction.isChatInputCommand() && interaction.commandName === "ticketpanel") {
+      return handleTicketPanelCommand(interaction);
+    }
+
+    // buttons
+    if (interaction.isButton()) {
+      const id = interaction.customId;
+
+      if (id === "ticket_open_shop") return createTicketChannel(interaction, "shop");
+      if (id === "ticket_open_report") return createTicketChannel(interaction, "report");
+      if (id === "ticket_open_general") return createTicketChannel(interaction, "general");
+
+      if (id.startsWith("ticket_claim:")) return claimTicket(interaction, id.split(":")[1]);
+      if (id.startsWith("ticket_close:")) return closeTicket(interaction, id.split(":")[1]);
+      if (id.startsWith("ticket_reopen:")) return reopenTicket(interaction, id.split(":")[1]);
+    }
+
+    return false;
+  }
+
+  return {
+    commands: getTicketCommands(),
+    handleInteraction,
+  };
+}
+
+module.exports = { initTicketSystem };
