@@ -65,6 +65,12 @@ const useWebhook = (KAOS_USE_WEBHOOK || "false").toLowerCase() === "true";
 const kaosWebhook =
   useWebhook && KAOS_WEBHOOK_URL ? new WebhookClient({ url: KAOS_WEBHOOK_URL }) : null;
 
+// ================== CLIENT ==================
+// MUST exist before ticket system boot
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
+});
+
 // ================== DATA PATHS ==================
 const DATA_DIR = path.join(__dirname, "data");
 const TOKENS_FILE = path.join(DATA_DIR, "tokens.json");
@@ -214,9 +220,27 @@ const DAILY_TOKENS = 1;
 
 // Risk tiers (token costs: 1/2/3)
 const TIERS = {
-  low: { key: "low", label: "Low", emoji: "🧯", tokenCost: 1, payouts: { 1: 250000, 2: 75000, 3: 25000, 4: 10000, 5: 5000 } },
-  standard: { key: "standard", label: "Standard", emoji: "🧨", tokenCost: 2, payouts: { 1: 1000000, 2: 250000, 3: 60000, 4: 30000, 5: 15000 } },
-  high: { key: "high", label: "High", emoji: "🔥", tokenCost: 3, payouts: { 1: 2000000, 2: 500000, 3: 120000, 4: 60000, 5: 30000 } },
+  low: {
+    key: "low",
+    label: "Low",
+    emoji: "🧯",
+    tokenCost: 1,
+    payouts: { 1: 250000, 2: 75000, 3: 25000, 4: 10000, 5: 5000 },
+  },
+  standard: {
+    key: "standard",
+    label: "Standard",
+    emoji: "🧨",
+    tokenCost: 2,
+    payouts: { 1: 1000000, 2: 250000, 3: 60000, 4: 30000, 5: 15000 },
+  },
+  high: {
+    key: "high",
+    label: "High",
+    emoji: "🔥",
+    tokenCost: 3,
+    payouts: { 1: 2000000, 2: 500000, 3: 120000, 4: 60000, 5: 30000 },
+  },
 };
 
 const TRACK_LEN = 18;
@@ -803,6 +827,7 @@ async function runSoloRace(interaction, colourKey, tierKey) {
     }
   }, TICK_MS);
 }
+
 // ================== PARTY ==================
 const partyByGuild = new Map();
 
@@ -1226,8 +1251,8 @@ function formatTop(arr, field, label) {
     })
     .join("\n");
 }
+
 /* ================== COMMANDS ================== */
-const TICKETS = initTicketSystem();
 const colourChoices = COLOURS.map((c) => ({ name: `${c.name} ${c.label}`, value: c.key }));
 const tierChoices = [
   { name: `${TIERS.low.emoji} Low`, value: "low" },
@@ -1235,12 +1260,16 @@ const tierChoices = [
   { name: `${TIERS.high.emoji} High`, value: "high" },
 ];
 
-const commands = [
+const commandsDef = [
   new SlashCommandBuilder()
     .setName("race")
     .setDescription("Solo RHIB race (pick a colour + tier).")
-    .addStringOption((o) => o.setName("colour").setDescription("Pick your colour").setRequired(true).addChoices(...colourChoices))
-    .addStringOption((o) => o.setName("tier").setDescription("Risk tier").setRequired(true).addChoices(...tierChoices)),
+    .addStringOption((o) =>
+      o.setName("colour").setDescription("Pick your colour").setRequired(true).addChoices(...colourChoices)
+    )
+    .addStringOption((o) =>
+      o.setName("tier").setDescription("Risk tier").setRequired(true).addChoices(...tierChoices)
+    ),
 
   new SlashCommandBuilder()
     .setName("raceparty")
@@ -1305,8 +1334,30 @@ const commands = [
     .addSubcommand((sc) => sc.setName("season-reset").setDescription("Reset season stats now (admin)"))
     .addSubcommand((sc) => sc.setName("season-info").setDescription("Show current season info (admin)"))
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
-].map((c) => c.toJSON());
-commands.push(...TICKETS.commands);
+];
+
+// ================== TICKETS BOOT ==================
+// Supports both styles:
+// 1) initTicketSystem(client, commandsDef, SlashCommandBuilder) returning {commands, handleInteraction}
+// 2) initTicketSystem registers its own listeners and/or mutates commandsDef
+let TICKETS = null;
+try {
+  const maybe = initTicketSystem(client, commandsDef, SlashCommandBuilder);
+  if (maybe && typeof maybe === "object") TICKETS = maybe;
+
+  // If ticket system returns commands, merge them in
+  if (TICKETS?.commands && Array.isArray(TICKETS.commands)) {
+    commandsDef.push(...TICKETS.commands);
+  }
+
+  console.log("🎟️ Ticket system booted.");
+} catch (e) {
+  console.error("Ticket system init failed:", e?.message || e);
+}
+
+// ✅ This is what gets deployed to Discord
+const commands = commandsDef.map((c) => c.toJSON());
+
 // ================== DEPLOY ==================
 async function deployCommandsServerOnly() {
   const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
@@ -1314,23 +1365,11 @@ async function deployCommandsServerOnly() {
   console.log("✅ Server-only commands deployed.");
 }
 
-// ================== CLIENT ==================
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
-});
-
 client.once("ready", async () => {
   ensureDataFiles();
   seasonCheckAndResetIfNeeded();
   console.log(`✅ Online as ${client.user.tag}`);
   console.log(`Season #${statsDB.meta.seasonNumber} started: ${new Date(statsDB.meta.seasonStart).toISOString()}`);
-  // Ticket system boot
-  try {
-    initTicketSystem(client);
-    console.log("🎟️ Ticket system initialised.");
-  } catch (e) {
-    console.error("Ticket system init failed:", e?.message || e);
-  }
 
   // intent sanity check (giveall needs member fetch)
   try {
@@ -1345,10 +1384,14 @@ client.once("ready", async () => {
 
 client.on("interactionCreate", async (interaction) => {
   try {
+    // Let ticket system handle buttons/modals/etc (and even slash if it wants)
+    if (TICKETS?.handleInteraction) {
+      const handled = await TICKETS.handleInteraction(interaction);
+      if (handled) return;
+    }
+
+    // From here on: only OUR slash commands
     if (!interaction.isChatInputCommand()) return;
-    // Let ticket system handle /ticketpanel + button clicks
-    const handledByTickets = await TICKETS.handleInteraction(interaction);
-    if (handledByTickets) return;
 
     // permission sanity check for visible commands
     if (interaction.channel && interaction.guild) {

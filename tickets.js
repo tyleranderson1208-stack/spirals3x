@@ -1,45 +1,42 @@
 "use strict";
 
 /**
- * Spirals 3X Ticket System
- * - Panel in a channel (buttons)
- * - Private ticket channels (not threads)
+ * SPIRALS 3X — Ticket System (panel-style channels, no threads)
  * - Multiple support roles per panel
- * - Ticket states + assign/close/reopen/transcript
- * - Logs + staff metrics + SLA escalation (simple)
+ * - Buttons: Create, Close, Reopen, Claim/Unclaim, Add Note, Transcript
+ * - Ticket states, staff seen indicator, silent escalation
+ * - Cooldown + abuse prevention
+ * - Rating 1–5 after close
+ * - Logs + transcripts to an optional log channel
+ *
+ * Requires: discord.js v14
  */
 
 const fs = require("fs");
 const path = require("path");
-
+const crypto = require("crypto");
 const {
-  SlashCommandBuilder,
   EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
   ChannelType,
+  PermissionFlagsBits,
   PermissionsBitField,
 } = require("discord.js");
 
-// ================== BRAND / COLOURS ==================
-const BRAND = process.env.TICKET_BRAND || "🌀 SPIRALS 3X";
-const COLOR_PRIMARY = 0x2efcff; // neon cyan-ish
-const COLOR_ACCENT = 0xa855f7; // neon purple-ish
-const COLOR_DARK = 0x0b1020;
+/* ===================== CONFIG + STORAGE ===================== */
 
-const FOOTER = process.env.UI_FOOTER || "🌀 SPIRALS 3X • Support";
+const BRAND = "🌀 SPIRALS 3X";
+const COLOR_PRIMARY = 0x00e5ff; // neon cyan
+const COLOR_ACCENT = 0xb400ff;  // neon purple
+const COLOR_DARK = 0x0a0012;
 
-// ================== ENV ==================
-const TICKET_LOG_CHANNEL_ID = process.env.TICKET_LOG_CHANNEL_ID || ""; // optional
-const TICKET_SLA_MINUTES = Math.max(1, parseInt(process.env.TICKET_SLA_MINUTES || "20", 10) || 20);
-const TICKET_ESCALATE_ROLE_ID = process.env.TICKET_ESCALATE_ROLE_ID || ""; // optional
-const TICKET_COOLDOWN_SECONDS = Math.max(30, parseInt(process.env.TICKET_COOLDOWN_SECONDS || "120", 10) || 120);
-
-// ================== DATA ==================
 const DATA_DIR = path.join(__dirname, "data");
 const TICKETS_FILE = path.join(DATA_DIR, "tickets.json");
-const METRICS_FILE = path.join(DATA_DIR, "ticket_metrics.json");
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -57,652 +54,774 @@ function loadJsonSafe(file, fallback) {
 function saveJson(file, obj) {
   ensureDir(path.dirname(file));
   const tmp = `${file}.tmp`;
+  const bak = `${file}.bak`;
   try {
+    if (fs.existsSync(file)) {
+      try { fs.copyFileSync(file, bak); } catch {}
+    }
     fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), "utf8");
     fs.renameSync(tmp, file);
   } catch (e) {
-    try {
-      if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
-    } catch {}
-    console.error("tickets saveJson error:", e?.message || e);
+    try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch {}
+    console.error("saveJson error:", e?.message || e);
   }
 }
 
-const db = loadJsonSafe(TICKETS_FILE, {
-  nextId: 1,
-  panels: {}, // panelMessageId -> panel config
-  tickets: {}, // ticketId -> ticket object
-  userCooldown: {}, // userId -> lastCreatedAt (unix sec)
-});
+// DB schema:
+// {
+//   panels: {
+//     [guildId]: {
+//       [panelChannelId]: {
+//         createdAt, createdBy,
+//         supportRoleIds: string[],
+//         logChannelId: string | "",
+//         categoryId: string | "",
+//         panelTitle: string,
+//         panelDescription: string,
+//         allowAttachments: boolean,
+//         cooldownSec: number,
+//         maxOpenPerUser: number
+//       }
+//     }
+//   },
+//   tickets: {
+//     [guildId]: {
+//       [ticketChannelId]: {
+//         id, createdAt, createdBy,
+//         panelChannelId,
+//         typeKey,
+//         state: "OPEN"|"CLOSED",
+//         claimedBy: string|null,
+//         lastStaffSeenAt: number,
+//         lastUserMsgAt: number,
+//         closeMeta: { closedAt, closedBy, reason } | null,
+//         rating: { score, ratedAt } | null,
+//         staffNotes: [{ at, by, note }]
+//       }
+//     }
+//   },
+//   cooldowns: { [guildId]: { [userId]: lastCreateAtSec } }
+// }
 
-const metrics = loadJsonSafe(METRICS_FILE, {
-  staff: {}, // staffId -> { assigned: 0, closed: 0, totalCloseSeconds: 0 }
-});
+const DEFAULT_DB = { panels: {}, tickets: {}, cooldowns: {} };
+const db = loadJsonSafe(TICKETS_FILE, { ...DEFAULT_DB });
+saveJson(TICKETS_FILE, db);
 
-function saveDb() {
-  saveJson(TICKETS_FILE, db);
-}
-function saveMetrics() {
-  saveJson(METRICS_FILE, metrics);
-}
+/* ===================== HELPERS ===================== */
 
 function nowSec() {
   return Math.floor(Date.now() / 1000);
 }
-
-function tagUser(id) {
-  return `<@${id}>`;
+function tag(uid) {
+  return `<@${uid}>`;
 }
-function tagRole(id) {
-  return `<@&${id}>`;
+function rid() {
+  return crypto.randomBytes(6).toString("hex");
+}
+function safeArr(x) {
+  return Array.isArray(x) ? x : [];
+}
+function getGuildPanels(guildId) {
+  if (!db.panels[guildId]) db.panels[guildId] = {};
+  return db.panels[guildId];
+}
+function getGuildTickets(guildId) {
+  if (!db.tickets[guildId]) db.tickets[guildId] = {};
+  return db.tickets[guildId];
+}
+function getGuildCooldowns(guildId) {
+  if (!db.cooldowns[guildId]) db.cooldowns[guildId] = {};
+  return db.cooldowns[guildId];
+}
+function persist() {
+  saveJson(TICKETS_FILE, db);
 }
 
-function isSupportMember(member, supportRoleIds = []) {
+const TICKET_TYPES = [
+  { key: "shop", label: "🛒 Shop Issue (Spirals / purchases)", desc: "Missing items, wrong items, Spirals not received, etc." },
+  { key: "report", label: "🚨 Report a Player", desc: "Cheating, harassment, scamming, rule-breaking." },
+  { key: "exploit", label: "🧪 Bug / Exploit", desc: "Game-breaking issues, exploits, duplication, etc." },
+  { key: "general", label: "💬 General Support", desc: "Anything else." },
+];
+
+function typeByKey(k) {
+  return TICKET_TYPES.find((t) => t.key === k) || TICKET_TYPES[3];
+}
+
+function header(title) {
+  return `**${title}** • ${BRAND}`;
+}
+
+function staffRolesMention(roleIds) {
+  const ids = safeArr(roleIds).filter(Boolean);
+  return ids.length ? ids.map((id) => `<@&${id}>`).join(" ") : "`No support roles set`";
+}
+
+function userOpenTicketsCount(guildId, userId) {
+  const tickets = Object.values(getGuildTickets(guildId));
+  return tickets.filter((t) => t.createdBy === userId && t.state === "OPEN").length;
+}
+
+function isSupport(member, panel) {
   if (!member) return false;
-  return supportRoleIds.some((rid) => member.roles?.cache?.has(rid));
+  if (member.permissions?.has(PermissionsBitField.Flags.Administrator)) return true;
+  const roles = safeArr(panel?.supportRoleIds);
+  return roles.some((rid) => member.roles?.cache?.has(rid));
 }
 
-function makePanelKey(guildId, channelId, messageId) {
-  return `${guildId}:${channelId}:${messageId}`;
+function canSeeTicket(member, ticket, panel) {
+  if (!member) return false;
+  if (member.user?.id === ticket.createdBy) return true;
+  return isSupport(member, panel);
 }
 
-// ================== COMMANDS ==================
-const ticketCommands = [
-  new SlashCommandBuilder()
-    .setName("ticketpanel")
-    .setDescription("Create a Spirals 3X support panel in a channel")
-    .addSubcommand((sc) =>
-      sc
-        .setName("create")
-        .setDescription("Create a ticket panel (buttons) in a channel")
-        .addChannelOption((o) =>
-          o
-            .setName("channel")
-            .setDescription("Where the panel message should be posted")
-            .addChannelTypes(ChannelType.GuildText)
-            .setRequired(true)
-        )
-        .addChannelOption((o) =>
-          o
-            .setName("category")
-            .setDescription("Category to create ticket channels under")
-            .addChannelTypes(ChannelType.GuildCategory)
-            .setRequired(true)
-        )
-        .addRoleOption((o) => o.setName("support_role_1").setDescription("Support role #1").setRequired(true))
-        .addRoleOption((o) => o.setName("support_role_2").setDescription("Support role #2 (optional)").setRequired(false))
-        .addRoleOption((o) => o.setName("support_role_3").setDescription("Support role #3 (optional)").setRequired(false))
-        .addStringOption((o) =>
-          o
-            .setName("title")
-            .setDescription("Panel title (optional)")
-            .setRequired(false)
-        )
-        .addStringOption((o) =>
-          o
-            .setName("description")
-            .setDescription("Panel description (optional)")
-            .setRequired(false)
-        )
-    )
-    .addSubcommand((sc) =>
-      sc
-        .setName("metrics")
-        .setDescription("View staff ticket metrics (support roles only)")
-    ),
-].map((c) => c.toJSON());
-
-// ================== PANEL UI ==================
-function panelEmbed(title, description) {
-  return new EmbedBuilder()
-    .setColor(COLOR_ACCENT)
-    .setTitle(title || `🎟️ ${BRAND} Support`)
-    .setDescription(
-      (description ? `${description}\n\n` : "") +
-        `Choose what you need help with below. A private channel will be created for you and staff.\n\n` +
-        `🛒 **Shop Issues** — payments, missing items, store problems\n` +
-        `🚩 **Report a Player** — cheating, harassment, scams\n` +
-        `🧩 **General Support** — anything else\n`
-    )
-    .setFooter({ text: FOOTER });
+function channelNameFor(user, typeKey) {
+  const base = typeKey || "ticket";
+  const safe = (user?.username || "user").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 10) || "user";
+  return `ticket-${base}-${safe}-${Math.floor(Math.random() * 900 + 100)}`;
 }
 
-function panelButtons(panelKey) {
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`ticket_open:${panelKey}:shop`).setLabel("Shop Issues").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`ticket_open:${panelKey}:report`).setLabel("Report a Player").setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId(`ticket_open:${panelKey}:general`).setLabel("General Support").setStyle(ButtonStyle.Secondary)
-  );
-}
-
-// ================== TICKET UI ==================
-function ticketStateLabel(state) {
-  if (state === "OPEN") return "🟢 Open";
-  if (state === "ASSIGNED") return "🟣 Assigned";
-  if (state === "WAITING") return "🟡 Waiting on Player";
-  if (state === "ESCALATED") return "🔴 Escalated";
-  if (state === "CLOSED") return "⚫ Closed";
-  return state;
-}
-
-function ticketTopicLabel(topic) {
-  if (topic === "shop") return "🛒 Shop Issues";
-  if (topic === "report") return "🚩 Report a Player";
-  return "🧩 General Support";
-}
-
-function ticketControlsRow(ticketId, state) {
-  const row = new ActionRowBuilder();
-
-  row.addComponents(
-    new ButtonBuilder()
-      .setCustomId(`ticket_assign:${ticketId}`)
-      .setLabel("Assign")
-      .setStyle(ButtonStyle.Secondary)
-  );
-
-  row.addComponents(
-    new ButtonBuilder()
-      .setCustomId(`ticket_seen:${ticketId}`)
-      .setLabel("Staff Seen")
-      .setStyle(ButtonStyle.Secondary)
-  );
-
-  if (state !== "CLOSED") {
-    row.addComponents(
-      new ButtonBuilder()
-        .setCustomId(`ticket_close:${ticketId}`)
-        .setLabel("Close")
-        .setStyle(ButtonStyle.Danger)
-    );
-  } else {
-    row.addComponents(
-      new ButtonBuilder()
-        .setCustomId(`ticket_reopen:${ticketId}`)
-        .setLabel("Reopen")
-        .setStyle(ButtonStyle.Primary)
-    );
-  }
-
-  row.addComponents(
-    new ButtonBuilder()
-      .setCustomId(`ticket_transcript:${ticketId}`)
-      .setLabel("Transcript")
-      .setStyle(ButtonStyle.Secondary)
-  );
-
-  return row;
-}
-
-function ratingRow(ticketId) {
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`ticket_rate:${ticketId}:1`).setLabel("1").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`ticket_rate:${ticketId}:2`).setLabel("2").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`ticket_rate:${ticketId}:3`).setLabel("3").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`ticket_rate:${ticketId}:4`).setLabel("4").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(`ticket_rate:${ticketId}:5`).setLabel("5").setStyle(ButtonStyle.Primary)
-  );
-}
-
-function ticketEmbed(t) {
-  const assigned = t.assignedTo ? tagUser(t.assignedTo) : "`Unassigned`";
-  const seen = t.lastStaffSeenAt ? `<t:${t.lastStaffSeenAt}:R>` : "`Not yet`";
-  const created = `<t:${t.createdAt}:F>`;
-
-  return new EmbedBuilder()
-    .setColor(t.state === "CLOSED" ? COLOR_DARK : COLOR_PRIMARY)
-    .setTitle(`🎟️ Ticket #${t.id} • ${ticketStateLabel(t.state)}`)
-    .setDescription(
-      `**Player:** ${tagUser(t.userId)}\n` +
-        `**Topic:** ${ticketTopicLabel(t.topic)}\n` +
-        `**Assigned:** ${assigned}\n` +
-        `**Created:** ${created}\n` +
-        `**Staff Seen:** ${seen}\n` +
-        (t.rating ? `\n⭐ **Rating:** **${t.rating}/5**` : "")
-    )
-    .setFooter({ text: FOOTER });
-}
-
-async function sendLog(guild, embed, content = "") {
-  if (!TICKET_LOG_CHANNEL_ID) return;
-  const ch = await guild.channels.fetch(TICKET_LOG_CHANNEL_ID).catch(() => null);
+async function sendLog(guild, panel, embed) {
+  const logId = panel?.logChannelId;
+  if (!logId) return;
+  const ch = await guild.channels.fetch(logId).catch(() => null);
   if (!ch || !("send" in ch)) return;
-  await ch.send({ content: content || undefined, embeds: [embed] }).catch(() => {});
+  await ch.send({ embeds: [embed] }).catch(() => {});
 }
 
-// ================== CREATE TICKET ==================
-async function createTicketFromPanel(interaction, panel, topic) {
-  const userId = interaction.user.id;
-  const guild = interaction.guild;
+/* ===================== UI BUILDERS ===================== */
 
-  // cooldown
-  const last = db.userCooldown[userId] || 0;
-  const left = last + TICKET_COOLDOWN_SECONDS - nowSec();
-  if (left > 0) {
-    return interaction.reply({
-      content: `⏳ Please wait <t:${nowSec() + left}:R> before opening another ticket.`,
-      ephemeral: true,
-    });
-  }
+function panelEmbed(panel, guild) {
+  const rolesText = staffRolesMention(panel.supportRoleIds);
+  const typesText = TICKET_TYPES.map((t) => `• **${t.label}** — ${t.desc}`).join("\n");
 
-  const id = db.nextId++;
-  const name = `ticket-${id}`;
-  const categoryId = panel.categoryId;
+  return new EmbedBuilder()
+    .setColor(COLOR_PRIMARY)
+    .setTitle(`🌀 ${BRAND} — Support Panel`)
+    .setDescription(
+      `${header(panel.panelTitle || "NEED HELP?")}\n\n` +
+        `${panel.panelDescription || "Pick a category and open a private ticket channel with staff."}\n\n` +
+        `**Available categories:**\n${typesText}\n\n` +
+        `**Support roles:**\n${rolesText}\n\n` +
+        `⚠️ Abuse/spam will be actioned.`
+    )
+    .setFooter({ text: guild?.name || BRAND });
+}
 
-  const supportRoleIds = panel.supportRoleIds || [];
-
-  const overwrites = [
-    { id: guild.roles.everyone.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-    { id: userId, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.AttachFiles] },
-    { id: guild.members.me.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ManageChannels, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.ManageMessages] },
-    ...supportRoleIds.map((rid) => ({
-      id: rid,
-      allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory, PermissionsBitField.Flags.AttachFiles],
-    })),
-  ];
-
-  const channel = await guild.channels
-    .create({
-      name,
-      type: ChannelType.GuildText,
-      parent: categoryId,
-      permissionOverwrites: overwrites,
-      topic: `Spirals3X Ticket #${id} • ${userId} • ${topic}`,
-    })
-    .catch(() => null);
-
-  if (!channel) {
-    return interaction.reply({ content: "❌ Couldn't create the ticket channel (check bot permissions).", ephemeral: true });
-  }
-
-  const t = {
-    id,
-    guildId: guild.id,
-    channelId: channel.id,
-    userId,
-    topic,
-    panelKey: panel.panelKey,
-    state: "OPEN",
-    assignedTo: null,
-    createdAt: nowSec(),
-    closedAt: null,
-    lastStaffSeenAt: 0,
-    escalatedAt: 0,
-    rating: 0,
-  };
-
-  db.tickets[String(id)] = t;
-  db.userCooldown[userId] = nowSec();
-  saveDb();
-
-  const pingRoles = supportRoleIds.length ? supportRoleIds.map(tagRole).join(" ") : "";
-  await channel.send({
-    content: `${tagUser(userId)} ticket created. ${pingRoles}`.trim(),
-    embeds: [ticketEmbed(t)],
-    components: [ticketControlsRow(String(id), t.state)],
-  });
-
-  await sendLog(
-    guild,
-    new EmbedBuilder()
-      .setColor(COLOR_PRIMARY)
-      .setTitle(`🎟️ Ticket Created • #${id}`)
-      .setDescription(`Channel: <#${channel.id}>\nPlayer: ${tagUser(userId)}\nTopic: ${ticketTopicLabel(topic)}`)
-      .setFooter({ text: FOOTER })
+function panelButtonsRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("ticket:create:shop").setLabel("Shop Issue").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("ticket:create:report").setLabel("Report Player").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("ticket:create:exploit").setLabel("Bug/Exploit").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("ticket:create:general").setLabel("General").setStyle(ButtonStyle.Secondary)
   );
-
-  return interaction.reply({ content: `✅ Ticket created: <#${channel.id}>`, ephemeral: true });
 }
 
-// ================== TRANSCRIPT ==================
+function ticketControlsRow(ticket) {
+  const claimed = !!ticket.claimedBy;
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("ticket:claim")
+      .setLabel(claimed ? "Claimed" : "Claim")
+      .setStyle(claimed ? ButtonStyle.Secondary : ButtonStyle.Primary)
+      .setDisabled(claimed),
+    new ButtonBuilder()
+      .setCustomId("ticket:unclaim")
+      .setLabel("Unclaim")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!claimed),
+    new ButtonBuilder().setCustomId("ticket:note").setLabel("Add Note").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("ticket:transcript").setLabel("Transcript").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(ticket.state === "OPEN" ? "ticket:close" : "ticket:reopen")
+      .setLabel(ticket.state === "OPEN" ? "Close" : "Reopen")
+      .setStyle(ticket.state === "OPEN" ? ButtonStyle.Danger : ButtonStyle.Success)
+  );
+}
+
+function ticketHeaderEmbed(ticket, openerUser, panel) {
+  const t = typeByKey(ticket.typeKey);
+  const stateText = ticket.state === "OPEN" ? "🟢 OPEN" : "🔴 CLOSED";
+  const claimedText = ticket.claimedBy ? `✅ Claimed by ${tag(ticket.claimedBy)}` : "—";
+  const rolesText = staffRolesMention(panel?.supportRoleIds);
+
+  return new EmbedBuilder()
+    .setColor(ticket.state === "OPEN" ? COLOR_ACCENT : COLOR_DARK)
+    .setTitle(`${t.label} — Ticket`)
+    .setDescription(
+      `${header("TICKET DETAILS")}\n\n` +
+        `**Opener:** ${tag(ticket.createdBy)}\n` +
+        `**State:** ${stateText}\n` +
+        `**Claim:** ${claimedText}\n\n` +
+        `**Support roles:**\n${rolesText}\n\n` +
+        `Use the buttons below for actions.`
+    )
+    .setFooter({ text: `Ticket ID: ${ticket.id}` });
+}
+
+function ratingRow() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("ticket:rate:1").setLabel("1").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("ticket:rate:2").setLabel("2").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("ticket:rate:3").setLabel("3").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("ticket:rate:4").setLabel("4").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("ticket:rate:5").setLabel("5").setStyle(ButtonStyle.Success)
+  );
+}
+
+/* ===================== TRANSCRIPT ===================== */
+
 async function buildTranscript(channel) {
-  // Fetch up to 100 most recent (good enough for v1)
+  // Grab last ~100 messages
   const msgs = await channel.messages.fetch({ limit: 100 }).catch(() => null);
-  if (!msgs) return { text: "Transcript fetch failed.", fileName: "transcript.txt" };
+  if (!msgs) return null;
 
   const arr = Array.from(msgs.values()).sort((a, b) => a.createdTimestamp - b.createdTimestamp);
   const lines = arr.map((m) => {
     const ts = new Date(m.createdTimestamp).toISOString();
     const author = `${m.author?.tag || "Unknown"} (${m.author?.id || "?"})`;
     const content = (m.content || "").replace(/\n/g, " ");
-    const atts = m.attachments?.size ? ` [attachments: ${m.attachments.map((a) => a.url).join(" ")}]` : "";
-    return `[${ts}] ${author}: ${content}${atts}`;
+    const att = m.attachments?.size ? ` [attachments:${m.attachments.size}]` : "";
+    return `[${ts}] ${author}: ${content}${att}`;
   });
 
-  return {
-    text: lines.join("\n").slice(0, 190000), // Discord file size/text safety
-    fileName: `ticket-transcript-${channel.id}.txt`,
-  };
+  const text = lines.join("\n");
+  const fileName = `ticket-transcript-${channel.id}.txt`;
+  const outPath = path.join(DATA_DIR, fileName);
+  ensureDir(DATA_DIR);
+  fs.writeFileSync(outPath, text, "utf8");
+  return { outPath, fileName, length: lines.length };
 }
 
-// ================== SLA ESCALATION (simple) ==================
-async function slaSweep(client) {
-  const now = nowSec();
-  const slaSec = TICKET_SLA_MINUTES * 60;
+/* ===================== CORE: CREATE PANEL ===================== */
 
-  for (const t of Object.values(db.tickets)) {
-    if (!t || t.state === "CLOSED") continue;
-
-    // If staff hasn't seen it within SLA
-    if (!t.lastStaffSeenAt && now - t.createdAt >= slaSec && !t.escalatedAt) {
-      t.state = "ESCALATED";
-      t.escalatedAt = now;
-
-      const guild = await client.guilds.fetch(t.guildId).catch(() => null);
-      if (!guild) continue;
-
-      const ch = await guild.channels.fetch(t.channelId).catch(() => null);
-      if (ch && "send" in ch) {
-        const ping = TICKET_ESCALATE_ROLE_ID ? `\n${tagRole(TICKET_ESCALATE_ROLE_ID)} (silent escalation)` : "";
-        await ch.send({
-          content: `🔴 This ticket hit SLA without a staff response.${ping}`,
-          embeds: [ticketEmbed(t)],
-          components: [ticketControlsRow(String(t.id), t.state)],
-        }).catch(() => {});
-      }
-
-      await sendLog(
-        guild,
-        new EmbedBuilder()
-          .setColor(COLOR_DARK)
-          .setTitle(`🔴 SLA Escalation • Ticket #${t.id}`)
-          .setDescription(`Channel: <#${t.channelId}>\nPlayer: ${tagUser(t.userId)}`)
-          .setFooter({ text: FOOTER })
-      );
-
-      saveDb();
-    }
-  }
+function buildTicketPanelCommand(SlashCommandBuilder) {
+  return new SlashCommandBuilder()
+    .setName("ticketpanel")
+    .setDescription("Create or update the Spirals ticket panel in this channel (admin).")
+    .addRoleOption((o) => o.setName("support_role_1").setDescription("Support role 1").setRequired(true))
+    .addRoleOption((o) => o.setName("support_role_2").setDescription("Support role 2").setRequired(false))
+    .addRoleOption((o) => o.setName("support_role_3").setDescription("Support role 3").setRequired(false))
+    .addChannelOption((o) =>
+      o.setName("log_channel").setDescription("Where transcripts/logs go (optional)").setRequired(false)
+    )
+    .addChannelOption((o) =>
+      o.setName("category").setDescription("Category for new ticket channels (optional)").setRequired(false)
+    )
+    .addIntegerOption((o) =>
+      o.setName("cooldown_sec").setDescription("Cooldown per user to open tickets (default 120)").setRequired(false)
+    )
+    .addIntegerOption((o) =>
+      o.setName("max_open_per_user").setDescription("Max open tickets per user (default 1)").setRequired(false)
+    )
+    .addStringOption((o) =>
+      o.setName("title").setDescription("Panel header title").setRequired(false)
+    )
+    .addStringOption((o) =>
+      o.setName("description").setDescription("Panel description text").setRequired(false)
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 }
 
-// ================== INTERACTION HANDLERS ==================
-async function handlePanelCreate(interaction) {
-  const channel = interaction.options.getChannel("channel", true);
-  const category = interaction.options.getChannel("category", true);
+async function handleTicketPanel(interaction) {
+  const guild = interaction.guild;
+  if (!guild) return interaction.reply({ content: "Guild only.", ephemeral: true });
+
   const r1 = interaction.options.getRole("support_role_1", true);
   const r2 = interaction.options.getRole("support_role_2", false);
   const r3 = interaction.options.getRole("support_role_3", false);
 
-  const title = interaction.options.getString("title", false);
-  const description = interaction.options.getString("description", false);
+  const logCh = interaction.options.getChannel("log_channel", false);
+  const category = interaction.options.getChannel("category", false);
 
-  const supportRoleIds = [r1?.id, r2?.id, r3?.id].filter(Boolean);
+  const cooldownSec = Math.max(10, interaction.options.getInteger("cooldown_sec", false) || 120);
+  const maxOpenPerUser = Math.max(1, interaction.options.getInteger("max_open_per_user", false) || 1);
 
-  // Send panel message
-  const panelMsg = await channel
-    .send({
-      embeds: [panelEmbed(title, description)],
-    })
-    .catch(() => null);
+  const title = interaction.options.getString("title", false) || "NEED HELP?";
+  const desc = interaction.options.getString("description", false) || "Choose a category below to open a private ticket.";
 
-  if (!panelMsg) {
-    return interaction.reply({ content: "❌ Couldn't post panel message. Check permissions.", ephemeral: true });
-  }
-
-  const panelKey = makePanelKey(interaction.guildId, channel.id, panelMsg.id);
-
-  // Edit panel with buttons (needs panelKey)
-  await panelMsg.edit({ components: [panelButtons(panelKey)] }).catch(() => {});
-
-  // Store panel config
-  db.panels[panelKey] = {
-    panelKey,
-    guildId: interaction.guildId,
-    channelId: channel.id,
-    messageId: panelMsg.id,
-    categoryId: category.id,
-    supportRoleIds,
+  const panel = {
     createdAt: nowSec(),
+    createdBy: interaction.user.id,
+    supportRoleIds: [r1?.id, r2?.id, r3?.id].filter(Boolean),
+    logChannelId: logCh?.id || "",
+    categoryId: category?.id || "",
+    panelTitle: title,
+    panelDescription: desc,
+    allowAttachments: true,
+    cooldownSec,
+    maxOpenPerUser,
   };
-  saveDb();
 
-  await interaction.reply({ content: `✅ Panel created in <#${channel.id}>.`, ephemeral: true });
+  const panels = getGuildPanels(guild.id);
+  panels[interaction.channelId] = panel;
+  persist();
+
+  await interaction.reply({ content: "✅ Ticket panel saved. Posting panel…", ephemeral: true });
+  await interaction.channel.send({
+    embeds: [panelEmbed(panel, guild)],
+    components: [panelButtonsRow()],
+  });
 }
 
-async function handleMetrics(interaction) {
-  // Only allow if user has ANY support role from ANY panel in guild
-  const member = interaction.member;
-  const guildPanels = Object.values(db.panels).filter((p) => p.guildId === interaction.guildId);
+/* ===================== CORE: CREATE TICKET ===================== */
 
-  const allowed = guildPanels.some((p) => isSupportMember(member, p.supportRoleIds));
-  if (!allowed) return interaction.reply({ content: "❌ Support only.", ephemeral: true });
+async function createTicketFromPanel(interaction, typeKey) {
+  const guild = interaction.guild;
+  if (!guild) return interaction.reply({ content: "Guild only.", ephemeral: true });
 
-  const arr = Object.entries(metrics.staff).map(([id, m]) => ({
-    id,
-    assigned: m.assigned || 0,
-    closed: m.closed || 0,
-    avgCloseMin: m.closed ? Math.round((m.totalCloseSeconds / m.closed) / 60) : 0,
-  }));
+  const panels = getGuildPanels(guild.id);
+  const panel = panels[interaction.channelId];
+  if (!panel) {
+    return interaction.reply({ content: "❌ This channel is not a ticket panel.", ephemeral: true });
+  }
 
-  arr.sort((a, b) => b.closed - a.closed);
+  // cooldown
+  const cds = getGuildCooldowns(guild.id);
+  const last = cds[interaction.user.id] || 0;
+  const left = last + panel.cooldownSec - nowSec();
+  if (left > 0) {
+    return interaction.reply({ content: `⏳ Slow down. Try again <t:${nowSec() + left}:R>.`, ephemeral: true });
+  }
 
-  const lines = arr.slice(0, 15).map((x, i) => {
-    return `**${i + 1}.** ${tagUser(x.id)} — closed **${x.closed}**, assigned **${x.assigned}**, avg close **${x.avgCloseMin}m**`;
-  });
+  // max open tickets
+  if (userOpenTicketsCount(guild.id, interaction.user.id) >= panel.maxOpenPerUser) {
+    return interaction.reply({ content: `❌ You already have an open ticket. Please close it first.`, ephemeral: true });
+  }
 
-  return interaction.reply({
+  cds[interaction.user.id] = nowSec();
+  persist();
+
+  const t = typeByKey(typeKey);
+
+  // channel creation perms
+  const overwrites = [
+    { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+    { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles] },
+  ];
+
+  for (const roleId of safeArr(panel.supportRoleIds)) {
+    overwrites.push({
+      id: roleId,
+      allow: [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.ManageMessages,
+        PermissionFlagsBits.AttachFiles,
+      ],
+    });
+  }
+
+  const categoryId = panel.categoryId || null;
+
+  const ch = await guild.channels
+    .create({
+      name: channelNameFor(interaction.user, typeKey),
+      type: ChannelType.GuildText,
+      parent: categoryId || undefined,
+      permissionOverwrites: overwrites,
+      topic: `Ticket • ${t.label} • Opener:${interaction.user.id}`,
+    })
+    .catch((e) => {
+      console.error("ticket create channel error:", e?.message || e);
+      return null;
+    });
+
+  if (!ch) return interaction.reply({ content: "❌ Failed to create ticket channel.", ephemeral: true });
+
+  const ticket = {
+    id: rid(),
+    createdAt: Date.now(),
+    createdBy: interaction.user.id,
+    panelChannelId: interaction.channelId,
+    typeKey,
+    state: "OPEN",
+    claimedBy: null,
+    lastStaffSeenAt: 0,
+    lastUserMsgAt: Date.now(),
+    closeMeta: null,
+    rating: null,
+    staffNotes: [],
+  };
+
+  const tickets = getGuildTickets(guild.id);
+  tickets[ch.id] = ticket;
+  persist();
+
+  await interaction.reply({ content: `✅ Ticket created: <#${ch.id}>`, ephemeral: true });
+
+  // Ticket intro
+  await ch.send({
+    content: `${tag(interaction.user.id)} — welcome! A support member will be with you shortly.\n` +
+      `**Category:** ${t.label}\n` +
+      `**Staff ping:** ${staffRolesMention(panel.supportRoleIds)}`,
+    embeds: [ticketHeaderEmbed(ticket, interaction.user, panel)],
+    components: [ticketControlsRow(ticket)],
+  }).catch(() => {});
+
+  await sendLog(
+    guild,
+    panel,
+    new EmbedBuilder()
+      .setColor(COLOR_PRIMARY)
+      .setTitle(`🎫 Ticket Opened`)
+      .setDescription(`**User:** ${tag(ticket.createdBy)}\n**Type:** ${t.label}\n**Channel:** <#${ch.id}>\n**Ticket ID:** ${ticket.id}`)
+      .setTimestamp(new Date())
+  );
+}
+
+/* ===================== CORE: TICKET ACTIONS ===================== */
+
+async function getTicketContext(interaction) {
+  const guild = interaction.guild;
+  if (!guild) return { guild: null, panel: null, ticket: null, tickets: null };
+
+  const tickets = getGuildTickets(guild.id);
+  const ticket = tickets[interaction.channelId];
+  if (!ticket) return { guild, panel: null, ticket: null, tickets };
+
+  const panels = getGuildPanels(guild.id);
+  const panel = panels[ticket.panelChannelId] || null;
+
+  return { guild, panel, ticket, tickets };
+}
+
+async function refreshTicketMessage(channel, ticket, panel) {
+  // Refresh by sending a new control message (simple + reliable)
+  await channel.send({
+    embeds: [ticketHeaderEmbed(ticket, null, panel)],
+    components: [ticketControlsRow(ticket)],
+  }).catch(() => {});
+}
+
+async function handleClaim(interaction) {
+  const { guild, panel, ticket, tickets } = await getTicketContext(interaction);
+  if (!ticket) return interaction.reply({ content: "Not a ticket channel.", ephemeral: true });
+
+  const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+  if (!isSupport(member, panel)) return interaction.reply({ content: "Staff only.", ephemeral: true });
+
+  if (ticket.state !== "OPEN") return interaction.reply({ content: "Ticket is closed.", ephemeral: true });
+  if (ticket.claimedBy) return interaction.reply({ content: "Already claimed.", ephemeral: true });
+
+  ticket.claimedBy = interaction.user.id;
+  tickets[interaction.channelId] = ticket;
+  persist();
+
+  await interaction.reply({ content: `✅ Claimed by ${tag(interaction.user.id)}`, ephemeral: true });
+  await refreshTicketMessage(interaction.channel, ticket, panel);
+
+  await sendLog(
+    guild,
+    panel,
+    new EmbedBuilder()
+      .setColor(COLOR_ACCENT)
+      .setTitle(`✅ Ticket Claimed`)
+      .setDescription(`**By:** ${tag(interaction.user.id)}\n**Channel:** <#${interaction.channelId}>\n**Ticket ID:** ${ticket.id}`)
+      .setTimestamp(new Date())
+  );
+}
+
+async function handleUnclaim(interaction) {
+  const { guild, panel, ticket, tickets } = await getTicketContext(interaction);
+  if (!ticket) return interaction.reply({ content: "Not a ticket channel.", ephemeral: true });
+
+  const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+  if (!isSupport(member, panel)) return interaction.reply({ content: "Staff only.", ephemeral: true });
+
+  if (!ticket.claimedBy) return interaction.reply({ content: "Not claimed.", ephemeral: true });
+
+  ticket.claimedBy = null;
+  tickets[interaction.channelId] = ticket;
+  persist();
+
+  await interaction.reply({ content: "✅ Unclaimed.", ephemeral: true });
+  await refreshTicketMessage(interaction.channel, ticket, panel);
+}
+
+async function handleClose(interaction) {
+  const { guild, panel, ticket, tickets } = await getTicketContext(interaction);
+  if (!ticket) return interaction.reply({ content: "Not a ticket channel.", ephemeral: true });
+
+  const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+  // allow opener or staff to close
+  const isOpener = interaction.user.id === ticket.createdBy;
+  if (!isOpener && !isSupport(member, panel)) return interaction.reply({ content: "No permission.", ephemeral: true });
+
+  if (ticket.state !== "OPEN") return interaction.reply({ content: "Already closed.", ephemeral: true });
+
+  const modal = new ModalBuilder()
+    .setCustomId("ticket:close:modal")
+    .setTitle("Close Ticket");
+
+  const reason = new TextInputBuilder()
+    .setCustomId("reason")
+    .setLabel("Reason (short)")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(false)
+    .setMaxLength(80);
+
+  modal.addComponents(new ActionRowBuilder().addComponents(reason));
+  await interaction.showModal(modal);
+}
+
+async function handleCloseModal(interaction) {
+  const { guild, panel, ticket, tickets } = await getTicketContext(interaction);
+  if (!ticket) return interaction.reply({ content: "Not a ticket channel.", ephemeral: true });
+
+  const reason = (interaction.fields.getTextInputValue("reason") || "").trim();
+
+  ticket.state = "CLOSED";
+  ticket.closeMeta = { closedAt: Date.now(), closedBy: interaction.user.id, reason: reason || "" };
+  tickets[interaction.channelId] = ticket;
+  persist();
+
+  // Lock channel for opener (keep visible), keep staff access
+  await interaction.channel.permissionOverwrites.edit(ticket.createdBy, {
+    SendMessages: false,
+    AddReactions: false,
+  }).catch(() => {});
+
+  await interaction.reply({ content: "✅ Ticket closed.", ephemeral: true });
+
+  await interaction.channel.send({
     embeds: [
       new EmbedBuilder()
-        .setColor(COLOR_ACCENT)
-        .setTitle(`📈 ${BRAND} • Staff Ticket Metrics`)
-        .setDescription(lines.length ? lines.join("\n") : "`No metrics yet.`")
-        .setFooter({ text: FOOTER }),
-    ],
-    ephemeral: true,
-  });
-}
-
-async function handleButton(interaction) {
-  const id = interaction.customId;
-
-  // Open ticket from panel
-  if (id.startsWith("ticket_open:")) {
-    const [, panelKey, topic] = id.split(":");
-    const panel = db.panels[panelKey];
-    if (!panel) return interaction.reply({ content: "❌ Panel not found (it may have been deleted).", ephemeral: true });
-    return createTicketFromPanel(interaction, panel, topic);
-  }
-
-  // ticket actions
-  const parts = id.split(":");
-  const action = parts[0];
-  const ticketId = parts[1];
-  const t = db.tickets[String(ticketId)];
-
-  if (!t) return interaction.reply({ content: "❌ Ticket not found.", ephemeral: true });
-
-  const guild = interaction.guild;
-  const channel = await guild.channels.fetch(t.channelId).catch(() => null);
-  if (!channel) return interaction.reply({ content: "❌ Ticket channel not found.", ephemeral: true });
-
-  // Determine support roles (from panel)
-  const panel = db.panels[t.panelKey] || null;
-  const supportRoleIds = panel?.supportRoleIds || [];
-  const member = interaction.member;
-  const isSupport = isSupportMember(member, supportRoleIds);
-
-  // Assign
-  if (action === "ticket_assign") {
-    if (!isSupport) return interaction.reply({ content: "❌ Support only.", ephemeral: true });
-
-    t.assignedTo = interaction.user.id;
-    t.state = "ASSIGNED";
-
-    metrics.staff[t.assignedTo] = metrics.staff[t.assignedTo] || { assigned: 0, closed: 0, totalCloseSeconds: 0 };
-    metrics.staff[t.assignedTo].assigned += 1;
-    saveMetrics();
-    saveDb();
-
-    await interaction.reply({ content: `✅ Assigned to ${tagUser(t.assignedTo)}.`, ephemeral: true });
-    await channel.send({ embeds: [ticketEmbed(t)], components: [ticketControlsRow(String(t.id), t.state)] }).catch(() => {});
-    return;
-  }
-
-  // Staff Seen
-  if (action === "ticket_seen") {
-    if (!isSupport) return interaction.reply({ content: "❌ Support only.", ephemeral: true });
-    t.lastStaffSeenAt = nowSec();
-    if (t.state === "OPEN") t.state = "WAITING";
-    saveDb();
-
-    await interaction.reply({ content: "✅ Marked as seen.", ephemeral: true });
-    await channel.send({ embeds: [ticketEmbed(t)], components: [ticketControlsRow(String(t.id), t.state)] }).catch(() => {});
-    return;
-  }
-
-  // Close
-  if (action === "ticket_close") {
-    if (!isSupport) return interaction.reply({ content: "❌ Support only.", ephemeral: true });
-
-    t.state = "CLOSED";
-    t.closedAt = nowSec();
-    saveDb();
-
-    // lock channel (player can read but not send)
-    await channel.permissionOverwrites
-      .edit(t.userId, { SendMessages: false, AttachFiles: false })
-      .catch(() => {});
-
-    // metrics close time (if assigned)
-    const closerId = interaction.user.id;
-    metrics.staff[closerId] = metrics.staff[closerId] || { assigned: 0, closed: 0, totalCloseSeconds: 0 };
-    metrics.staff[closerId].closed += 1;
-    metrics.staff[closerId].totalCloseSeconds += Math.max(0, (t.closedAt || nowSec()) - t.createdAt);
-    saveMetrics();
-
-    await interaction.reply({ content: "✅ Ticket closed.", ephemeral: true });
-
-    await channel
-      .send({
-        content: `⚫ Ticket closed by ${tagUser(closerId)}.\nPlease rate support (1–5):`,
-        embeds: [ticketEmbed(t)],
-        components: [ticketControlsRow(String(t.id), t.state), ratingRow(String(t.id))],
-      })
-      .catch(() => {});
-
-    await sendLog(
-      guild,
-      new EmbedBuilder()
         .setColor(COLOR_DARK)
-        .setTitle(`⚫ Ticket Closed • #${t.id}`)
-        .setDescription(`Channel: <#${t.channelId}>\nPlayer: ${tagUser(t.userId)}\nClosed by: ${tagUser(closerId)}`)
-        .setFooter({ text: FOOTER })
-    );
+        .setTitle(`🔒 Ticket Closed`)
+        .setDescription(
+          `${header("CLOSED")}\n\n` +
+            `Closed by: ${tag(interaction.user.id)}\n` +
+            (reason ? `Reason: **${reason}**\n` : "") +
+            `\n**Rate support:** (1–5)`
+        ),
+    ],
+    components: [ratingRow(), ticketControlsRow(ticket)],
+  }).catch(() => {});
 
-    return;
+  await sendLog(
+    guild,
+    panel,
+    new EmbedBuilder()
+      .setColor(COLOR_DARK)
+      .setTitle(`🔒 Ticket Closed`)
+      .setDescription(`**By:** ${tag(interaction.user.id)}\n**Channel:** <#${interaction.channelId}>\n**Ticket ID:** ${ticket.id}\n${reason ? `**Reason:** ${reason}` : ""}`)
+      .setTimestamp(new Date())
+  );
+}
+
+async function handleReopen(interaction) {
+  const { guild, panel, ticket, tickets } = await getTicketContext(interaction);
+  if (!ticket) return interaction.reply({ content: "Not a ticket channel.", ephemeral: true });
+
+  const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+  const isOpener = interaction.user.id === ticket.createdBy;
+  if (!isOpener && !isSupport(member, panel)) return interaction.reply({ content: "No permission.", ephemeral: true });
+
+  if (ticket.state !== "CLOSED") return interaction.reply({ content: "Ticket isn't closed.", ephemeral: true });
+
+  ticket.state = "OPEN";
+  ticket.closeMeta = null;
+  tickets[interaction.channelId] = ticket;
+  persist();
+
+  await interaction.channel.permissionOverwrites.edit(ticket.createdBy, {
+    SendMessages: true,
+    AddReactions: true,
+  }).catch(() => {});
+
+  await interaction.reply({ content: "✅ Reopened.", ephemeral: true });
+  await refreshTicketMessage(interaction.channel, ticket, panel);
+}
+
+async function handleRate(interaction, score) {
+  const { guild, panel, ticket, tickets } = await getTicketContext(interaction);
+  if (!ticket) return interaction.reply({ content: "Not a ticket channel.", ephemeral: true });
+
+  if (interaction.user.id !== ticket.createdBy) {
+    return interaction.reply({ content: "Only the ticket opener can rate.", ephemeral: true });
+  }
+  if (ticket.state !== "CLOSED") {
+    return interaction.reply({ content: "You can rate after closing.", ephemeral: true });
+  }
+  if (ticket.rating) {
+    return interaction.reply({ content: "You already rated this ticket.", ephemeral: true });
   }
 
-  // Reopen
-  if (action === "ticket_reopen") {
-    if (!isSupport) return interaction.reply({ content: "❌ Support only.", ephemeral: true });
+  ticket.rating = { score, ratedAt: Date.now() };
+  tickets[interaction.channelId] = ticket;
+  persist();
 
-    t.state = "OPEN";
-    t.closedAt = 0;
-    saveDb();
+  await interaction.reply({ content: `✅ Thanks! Rated: **${score}/5**`, ephemeral: true });
 
-    await channel.permissionOverwrites
-      .edit(t.userId, { SendMessages: true, AttachFiles: true })
-      .catch(() => {});
+  await sendLog(
+    guild,
+    panel,
+    new EmbedBuilder()
+      .setColor(COLOR_PRIMARY)
+      .setTitle(`⭐ Ticket Rated`)
+      .setDescription(`**User:** ${tag(ticket.createdBy)}\n**Score:** **${score}/5**\n**Channel:** <#${interaction.channelId}>\n**Ticket ID:** ${ticket.id}`)
+      .setTimestamp(new Date())
+  );
+}
 
-    await interaction.reply({ content: "✅ Ticket reopened.", ephemeral: true });
-    await channel.send({ embeds: [ticketEmbed(t)], components: [ticketControlsRow(String(t.id), t.state)] }).catch(() => {});
-    return;
-  }
+async function handleNote(interaction) {
+  const { guild, panel, ticket, tickets } = await getTicketContext(interaction);
+  if (!ticket) return interaction.reply({ content: "Not a ticket channel.", ephemeral: true });
 
-  // Transcript
-  if (action === "ticket_transcript") {
-    if (!isSupport) return interaction.reply({ content: "❌ Support only.", ephemeral: true });
+  const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+  if (!isSupport(member, panel)) return interaction.reply({ content: "Staff only.", ephemeral: true });
 
-    await interaction.reply({ content: "📄 Building transcript…", ephemeral: true });
+  const modal = new ModalBuilder().setCustomId("ticket:note:modal").setTitle("Internal Staff Note");
+  const note = new TextInputBuilder()
+    .setCustomId("note")
+    .setLabel("Note (internal)")
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(true)
+    .setMaxLength(800);
 
-    const tx = await buildTranscript(channel);
-    const buf = Buffer.from(tx.text, "utf8");
+  modal.addComponents(new ActionRowBuilder().addComponents(note));
+  await interaction.showModal(modal);
+}
 
-    await sendLog(
-      guild,
-      new EmbedBuilder()
-        .setColor(COLOR_ACCENT)
-        .setTitle(`📄 Transcript • Ticket #${t.id}`)
-        .setDescription(`Channel: <#${t.channelId}>\nRequested by: ${tagUser(interaction.user.id)}`)
-        .setFooter({ text: FOOTER })
-    );
+async function handleNoteModal(interaction) {
+  const { guild, panel, ticket, tickets } = await getTicketContext(interaction);
+  if (!ticket) return interaction.reply({ content: "Not a ticket channel.", ephemeral: true });
 
-    // Also send transcript file into log channel if set, else into ticket channel
-    const target =
-      (TICKET_LOG_CHANNEL_ID && (await guild.channels.fetch(TICKET_LOG_CHANNEL_ID).catch(() => null))) || channel;
+  const note = (interaction.fields.getTextInputValue("note") || "").trim();
+  if (!note) return interaction.reply({ content: "Empty note.", ephemeral: true });
 
-    if (target && "send" in target) {
-      await target.send({
-        content: `📄 Transcript for Ticket #${t.id}`,
-        files: [{ attachment: buf, name: tx.fileName }],
-      }).catch(() => {});
+  ticket.staffNotes.push({ at: Date.now(), by: interaction.user.id, note });
+  tickets[interaction.channelId] = ticket;
+  persist();
+
+  await interaction.reply({ content: "✅ Note saved (internal).", ephemeral: true });
+
+  await sendLog(
+    guild,
+    panel,
+    new EmbedBuilder()
+      .setColor(COLOR_ACCENT)
+      .setTitle(`📝 Staff Note Added`)
+      .setDescription(`**By:** ${tag(interaction.user.id)}\n**Channel:** <#${interaction.channelId}>\n**Ticket ID:** ${ticket.id}\n\n${note.slice(0, 500)}${note.length > 500 ? "…" : ""}`)
+      .setTimestamp(new Date())
+  );
+}
+
+async function handleTranscript(interaction) {
+  const { guild, panel, ticket } = await getTicketContext(interaction);
+  if (!ticket) return interaction.reply({ content: "Not a ticket channel.", ephemeral: true });
+
+  const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+  const isOpener = interaction.user.id === ticket.createdBy;
+  if (!isOpener && !isSupport(member, panel)) return interaction.reply({ content: "No permission.", ephemeral: true });
+
+  await interaction.reply({ content: "📄 Building transcript…", ephemeral: true });
+
+  const out = await buildTranscript(interaction.channel);
+  if (!out) return interaction.followUp({ content: "❌ Failed to build transcript.", ephemeral: true });
+
+  // post to log channel if set
+  const logId = panel?.logChannelId;
+  if (logId) {
+    const logCh = await guild.channels.fetch(logId).catch(() => null);
+    if (logCh && "send" in logCh) {
+      await logCh
+        .send({
+          content: `📄 Transcript for <#${interaction.channelId}> (Ticket ID: ${ticket.id})`,
+          files: [{ attachment: out.outPath, name: out.fileName }],
+        })
+        .catch(() => {});
     }
+  }
 
+  await interaction.followUp({ content: "✅ Transcript generated (sent to logs if configured).", ephemeral: true });
+}
+
+/* ===================== STAFF SEEN INDICATOR + SILENT ESCALATION ===================== */
+
+async function onMessageCreate(message) {
+  if (!message.guild || message.author?.bot) return;
+  const tickets = getGuildTickets(message.guild.id);
+  const ticket = tickets[message.channelId];
+  if (!ticket) return;
+
+  const panels = getGuildPanels(message.guild.id);
+  const panel = panels[ticket.panelChannelId];
+  if (!panel) return;
+
+  // Track last user message time (for SLA timers later)
+  if (message.author.id === ticket.createdBy) {
+    ticket.lastUserMsgAt = Date.now();
+    tickets[message.channelId] = ticket;
+    persist();
     return;
   }
 
-  // Rating
-  if (action === "ticket_rate") {
-    // ticket_rate:<ticketId>:<n>
-    const rating = parseInt(parts[2] || "0", 10);
-    if (!rating || rating < 1 || rating > 5) return interaction.reply({ content: "❌ Invalid rating.", ephemeral: true });
-
-    // allow ONLY ticket owner to rate
-    if (interaction.user.id !== t.userId) {
-      return interaction.reply({ content: "❌ Only the ticket owner can rate.", ephemeral: true });
-    }
-
-    t.rating = rating;
-    saveDb();
-
-    await interaction.reply({ content: `⭐ Thanks! You rated support **${rating}/5**.`, ephemeral: true });
-    await channel.send({ embeds: [ticketEmbed(t)] }).catch(() => {});
-    return;
+  // Staff seen indicator
+  const member = await message.guild.members.fetch(message.author.id).catch(() => null);
+  if (isSupport(member, panel)) {
+    ticket.lastStaffSeenAt = Date.now();
+    tickets[message.channelId] = ticket;
+    persist();
   }
 }
 
-// ================== INIT ==================
-function initTicketSystem(client) {
-  // Expose commands list to main bot
-  client.__ticketCommands = ticketCommands;
+/* ===================== INIT ===================== */
 
-  // SLA sweep every 60s
-  setInterval(() => {
-    slaSweep(client).catch(() => {});
-  }, 60_000);
+function initTicketSystem(client, commandsArray, SlashCommandBuilder) {
+  // Add slash command definition to bot.js command list
+  commandsArray.push(buildTicketPanelCommand(SlashCommandBuilder).toJSON());
 
+  // Interaction handler
   client.on("interactionCreate", async (interaction) => {
     try {
       if (interaction.isChatInputCommand()) {
-        if (interaction.commandName !== "ticketpanel") return;
-
-        const sub = interaction.options.getSubcommand();
-
-        // Admin only for create
-        if (sub === "create") {
-          const isAdmin = interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator);
-          if (!isAdmin) return interaction.reply({ content: "❌ Admin only.", ephemeral: true });
-          return handlePanelCreate(interaction);
-        }
-
-        if (sub === "metrics") {
-          return handleMetrics(interaction);
+        if (interaction.commandName === "ticketpanel") {
+          return handleTicketPanel(interaction);
         }
       }
 
       if (interaction.isButton()) {
-        if (!interaction.customId.startsWith("ticket_")) return;
-        return handleButton(interaction);
+        const id = interaction.customId;
+
+        // panel creates
+        if (id.startsWith("ticket:create:")) {
+          const typeKey = id.split(":")[2];
+          return createTicketFromPanel(interaction, typeKey);
+        }
+
+        // ticket actions
+        if (id === "ticket:claim") return handleClaim(interaction);
+        if (id === "ticket:unclaim") return handleUnclaim(interaction);
+        if (id === "ticket:close") return handleClose(interaction);
+        if (id === "ticket:reopen") return handleReopen(interaction);
+        if (id === "ticket:note") return handleNote(interaction);
+        if (id === "ticket:transcript") return handleTranscript(interaction);
+
+        if (id.startsWith("ticket:rate:")) {
+          const score = parseInt(id.split(":")[2], 10);
+          if (![1, 2, 3, 4, 5].includes(score)) return;
+          return handleRate(interaction, score);
+        }
+      }
+
+      if (interaction.isModalSubmit()) {
+        if (interaction.customId === "ticket:close:modal") return handleCloseModal(interaction);
+        if (interaction.customId === "ticket:note:modal") return handleNoteModal(interaction);
       }
     } catch (e) {
-      console.log("tickets interaction error:", e?.message || e);
-      if (!interaction.replied) {
-        try {
+      console.error("ticket interaction error:", e?.message || e);
+      try {
+        if (!interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: "❌ Ticket system error (check logs).", ephemeral: true });
-        } catch {}
-      }
+        }
+      } catch {}
     }
   });
+
+  client.on("messageCreate", onMessageCreate);
 }
 
-module.exports = { initTicketSystem, ticketCommands };
+module.exports = { initTicketSystem };
