@@ -1323,6 +1323,13 @@ client.once("ready", async () => {
   seasonCheckAndResetIfNeeded();
   console.log(`✅ Online as ${client.user.tag}`);
   console.log(`Season #${statsDB.meta.seasonNumber} started: ${new Date(statsDB.meta.seasonStart).toISOString()}`);
+  // Ticket system boot
+  try {
+    initTicketSystem(client);
+    console.log("🎟️ Ticket system initialised.");
+  } catch (e) {
+    console.error("Ticket system init failed:", e?.message || e);
+  }
 
   // intent sanity check (giveall needs member fetch)
   try {
