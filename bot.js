@@ -1234,8 +1234,6 @@ function formatTop(arr, field, label) {
     })
     .join("\n");
 }
-/* ================== TICKETS ================== */
-const TICKETS = initTicketSystem(client, commandsDef);
 
 /* ================== COMMANDS ================== */
 const colourChoices = COLOURS.map((c) => ({ name: `${c.name} ${c.label}`, value: c.key }));
@@ -1334,6 +1332,9 @@ commandsDef.push(...TICKETS.commands);
 
 // ✅ This is what gets deployed to Discord
 const commands = commandsDef.map((c) => c.toJSON());
+
+/* ================== TICKETS ================== */
+const TICKETS = initTicketSystem(client, commandsDef);
 
 // ================== DEPLOY ==================
 async function deployCommandsServerOnly() {
