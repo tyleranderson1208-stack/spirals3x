@@ -1327,14 +1327,11 @@ const commandsDef = [
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 ];
 
-// add ticket commands from tickets.js
-commandsDef.push(...TICKETS.commands);
+/* ================== TICKETS ================== */
+const TICKETS = initTicketSystem(client, commandsDef);
 
 // ✅ This is what gets deployed to Discord
 const commands = commandsDef.map((c) => c.toJSON());
-
-/* ================== TICKETS ================== */
-const TICKETS = initTicketSystem(client, commandsDef);
 
 // ================== DEPLOY ==================
 async function deployCommandsServerOnly() {
