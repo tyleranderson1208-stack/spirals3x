@@ -22,6 +22,11 @@ function safeId(x) {
   return (x || "").toString().trim();
 }
 
+function safeSnowflake(x) {
+  const id = safeId(x);
+  return /^\d+$/.test(id) ? id : "";
+}
+
 function envBool(v, def = false) {
   if (v == null) return def;
   return String(v).toLowerCase() === "true";
@@ -200,12 +205,12 @@ function initTicketSystem(client, commandsDef /* extra args ignored */) {
   const TICKETS_FILE = path.join(DATA_DIR, "tickets.json");
 
   const cfg = {
-    categoryId: safeId(process.env.TICKET_CATEGORY_ID),
-    staffRoleId: safeId(process.env.TICKET_STAFF_ROLE_ID),
-    adminRoleId: safeId(process.env.TICKET_ADMIN_ROLE_ID),
-    logChannelId: safeId(process.env.TICKET_LOG_CHANNEL_ID),
-    transcriptsChannelId: safeId(process.env.TICKET_TRANSCRIPTS_CHANNEL_ID),
-    escalateRoleId: safeId(process.env.TICKET_ESCALATE_ROLE_ID),
+    categoryId: safeSnowflake(process.env.TICKET_CATEGORY_ID),
+    staffRoleId: safeSnowflake(process.env.TICKET_STAFF_ROLE_ID),
+    adminRoleId: safeSnowflake(process.env.TICKET_ADMIN_ROLE_ID),
+    logChannelId: safeSnowflake(process.env.TICKET_LOG_CHANNEL_ID),
+    transcriptsChannelId: safeSnowflake(process.env.TICKET_TRANSCRIPTS_CHANNEL_ID),
+    escalateRoleId: safeSnowflake(process.env.TICKET_ESCALATE_ROLE_ID),
 
     panelTitle: process.env.TICKET_PANEL_TITLE || "Support Tickets",
     panelDesc: process.env.TICKET_PANEL_DESC || "Pick a category below and we’ll open a private ticket for you.",
