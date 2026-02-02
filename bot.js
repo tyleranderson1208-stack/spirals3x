@@ -6,7 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-const { createTicketSystem } = require("./tickets");
+const { initTicketSystem } = require("./tickets");
 
 const {
   Client,
@@ -1235,7 +1235,7 @@ function formatTop(arr, field, label) {
     .join("\n");
 }
 /* ================== TICKETS ================== */
-const TICKETS = createTicketSystem();
+const TICKETS = initTicketSystem(client, commandsDef);
 
 /* ================== COMMANDS ================== */
 const colourChoices = COLOURS.map((c) => ({ name: `${c.name} ${c.label}`, value: c.key }));
