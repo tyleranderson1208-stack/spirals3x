@@ -1,9 +1,12 @@
+"use strict";
+
 require("dotenv").config();
 
-const { initTicketSystem } = require("./tickets");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+
+const { createTicketSystem } = require("./tickets");
 
 const {
   Client,
@@ -66,7 +69,6 @@ const kaosWebhook =
   useWebhook && KAOS_WEBHOOK_URL ? new WebhookClient({ url: KAOS_WEBHOOK_URL }) : null;
 
 // ================== CLIENT ==================
-// MUST exist before ticket system boot
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
 });
@@ -220,27 +222,9 @@ const DAILY_TOKENS = 1;
 
 // Risk tiers (token costs: 1/2/3)
 const TIERS = {
-  low: {
-    key: "low",
-    label: "Low",
-    emoji: "🧯",
-    tokenCost: 1,
-    payouts: { 1: 250000, 2: 75000, 3: 25000, 4: 10000, 5: 5000 },
-  },
-  standard: {
-    key: "standard",
-    label: "Standard",
-    emoji: "🧨",
-    tokenCost: 2,
-    payouts: { 1: 1000000, 2: 250000, 3: 60000, 4: 30000, 5: 15000 },
-  },
-  high: {
-    key: "high",
-    label: "High",
-    emoji: "🔥",
-    tokenCost: 3,
-    payouts: { 1: 2000000, 2: 500000, 3: 120000, 4: 60000, 5: 30000 },
-  },
+  low: { key: "low", label: "Low", emoji: "🧯", tokenCost: 1, payouts: { 1: 250000, 2: 75000, 3: 25000, 4: 10000, 5: 5000 } },
+  standard: { key: "standard", label: "Standard", emoji: "🧨", tokenCost: 2, payouts: { 1: 1000000, 2: 250000, 3: 60000, 4: 30000, 5: 15000 } },
+  high: { key: "high", label: "High", emoji: "🔥", tokenCost: 3, payouts: { 1: 2000000, 2: 500000, 3: 120000, 4: 60000, 5: 30000 } },
 };
 
 const TRACK_LEN = 18;
@@ -515,7 +499,6 @@ async function cinematicLaunch(interaction, title) {
   await new Promise((r) => setTimeout(r, 520));
   await interaction.editReply({ content: "🏁 **LAUNCH!**" });
 }
-
 // ================== SOLO RACE ==================
 const activeSoloRace = new Set();
 const activeSoloRaceByGuild = new Map(); // guildId -> count
@@ -1251,6 +1234,8 @@ function formatTop(arr, field, label) {
     })
     .join("\n");
 }
+/* ================== TICKETS ================== */
+const TICKETS = createTicketSystem();
 
 /* ================== COMMANDS ================== */
 const colourChoices = COLOURS.map((c) => ({ name: `${c.name} ${c.label}`, value: c.key }));
@@ -1265,10 +1250,18 @@ const commandsDef = [
     .setName("race")
     .setDescription("Solo RHIB race (pick a colour + tier).")
     .addStringOption((o) =>
-      o.setName("colour").setDescription("Pick your colour").setRequired(true).addChoices(...colourChoices)
+      o
+        .setName("colour")
+        .setDescription("Pick your colour")
+        .setRequired(true)
+        .addChoices(...colourChoices)
     )
     .addStringOption((o) =>
-      o.setName("tier").setDescription("Risk tier").setRequired(true).addChoices(...tierChoices)
+      o
+        .setName("tier")
+        .setDescription("Risk tier")
+        .setRequired(true)
+        .addChoices(...tierChoices)
     ),
 
   new SlashCommandBuilder()
@@ -1336,24 +1329,8 @@ const commandsDef = [
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 ];
 
-// ================== TICKETS BOOT ==================
-// Supports both styles:
-// 1) initTicketSystem(client, commandsDef, SlashCommandBuilder) returning {commands, handleInteraction}
-// 2) initTicketSystem registers its own listeners and/or mutates commandsDef
-let TICKETS = null;
-try {
-  const maybe = initTicketSystem(client, commandsDef, SlashCommandBuilder);
-  if (maybe && typeof maybe === "object") TICKETS = maybe;
-
-  // If ticket system returns commands, merge them in
-  if (TICKETS?.commands && Array.isArray(TICKETS.commands)) {
-    commandsDef.push(...TICKETS.commands);
-  }
-
-  console.log("🎟️ Ticket system booted.");
-} catch (e) {
-  console.error("Ticket system init failed:", e?.message || e);
-}
+// add ticket commands from tickets.js
+commandsDef.push(...TICKETS.commands);
 
 // ✅ This is what gets deployed to Discord
 const commands = commandsDef.map((c) => c.toJSON());
@@ -1384,13 +1361,10 @@ client.once("ready", async () => {
 
 client.on("interactionCreate", async (interaction) => {
   try {
-    // Let ticket system handle buttons/modals/etc (and even slash if it wants)
-    if (TICKETS?.handleInteraction) {
-      const handled = await TICKETS.handleInteraction(interaction);
-      if (handled) return;
-    }
+    // ✅ Let ticket system handle /ticketpanel + buttons + modals
+    const handledByTickets = await TICKETS.handleInteraction(interaction);
+    if (handledByTickets) return;
 
-    // From here on: only OUR slash commands
     if (!interaction.isChatInputCommand()) return;
 
     // permission sanity check for visible commands
