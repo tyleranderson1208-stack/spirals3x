@@ -884,4 +884,7 @@ function initTicketSystem(client, commandsDef /* extra args ignored */) {
   return { commands, handleInteraction };
 }
 
-module.exports = { initTicketSystem };
+module.exports = {
+  initTicketSystem,
+  createTicketSystem: initTicketSystem,
+};

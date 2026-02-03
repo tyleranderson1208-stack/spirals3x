@@ -6,8 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-const { createTicketSystem } = require("./tickets");
-const { createSuggestionSystem } = require("./suggestions");
+const { initTicketSystem } = require("./tickets");
 
 const {
   Client,
@@ -500,7 +499,6 @@ async function cinematicLaunch(interaction, title) {
   await new Promise((r) => setTimeout(r, 520));
   await interaction.editReply({ content: "🏁 **LAUNCH!**" });
 }
-
 // ================== SOLO RACE ==================
 const activeSoloRace = new Set();
 const activeSoloRaceByGuild = new Map(); // guildId -> count
@@ -645,7 +643,7 @@ async function runSoloRace(interaction, colourKey, tierKey) {
         step = Math.max(0, Math.min(3, step));
         r.pos += step;
 
-        if (r.pos >= TRACK_LEN - 1) {
+        if (r.pos >= TRACK_LEN) {
           r.pos = TRACK_LEN - 1;
           r.finished = true;
           r.finishTick = tick;
@@ -653,231 +651,273 @@ async function runSoloRace(interaction, colourKey, tierKey) {
         }
       }
 
-      const lines = racers
-        .map((r) => ({
-          ...r,
-          badge: r.finished ? placeBadge(finishedCount) : "",
-        }))
-        .sort((a, b) => b.pos - a.pos)
-        .map((r) => renderLine(r, r.pos, r.finished ? placeBadge(r.finishTick) : "", rhibEmoji));
+      let places = [];
+      if (finishedCount === racers.length) {
+        places = racers
+          .slice()
+          .sort((a, b) => a.finishTick - b.finishTick || b.pos - a.pos)
+          .map((r, i) => ({ ...r, place: i + 1 }));
+      }
 
-      const title = `🏇 ${BRAND} — SOLO RHIB RACE`;
-      const desc =
-        `${header("RACE IN PROGRESS")}\n\n` +
-        `🎯 **Your RHIB:** ${bet.label}\n` +
-        `${tier.emoji} **Tier:** ${tier.label}\n` +
-        `🎟️ **Tokens left:** \`${getTok(userId).tokens}\`\n\n` +
-        lines.join("\n") +
-        (commentary ? `\n\n${commentary}` : "");
+      const lines = (places.length ? places : racers).map((r) => {
+        const badge = places.length ? placeBadge(r.place) : `(${pct(r.pos)}%)`;
+        return renderLine(r, r.pos, badge, rhibEmoji);
+      });
 
-      const frameKey = `${desc}`;
+      const comms = racers
+        .filter((r) => r.lastEvent)
+        .slice(0, 2)
+        .map((r) => `${r.label} ${r.lastEvent}`)
+        .join("\n");
+
+      // Edit-throttle key
+      const frameKey = `${lines.join("|")}__${comms}__${commentary || ""}`;
       if (frameKey !== lastFrameKey) {
         lastFrameKey = frameKey;
         await msg
           .edit({
-            embeds: [new EmbedBuilder().setColor(COLOR_PRIMARY).setTitle(title).setDescription(desc).setFooter({ text: FOOTER })],
+            embeds: [
+              new EmbedBuilder()
+                .setColor(COLOR_ACCENT)
+                .setTitle(`🏁 ${BRAND} — LIVE TRACK FEED`)
+                .setDescription(
+                  `${header("SOLO LIVE")}\n\n` +
+                    `👤 **Racer:** ${tag(userId)} • 🎯 **RHIB:** ${bet.label}\n` +
+                    `${tier.emoji} **Tier:** ${tier.label}\n\n` +
+                    `🏁 **Track:**\n${lines.join("\n")}\n\n` +
+                    `📡 **Comms:**\n${comms || "`Seas are calm…`"}\n` +
+                    (commentary ? `\n${commentary}` : "")
+                )
+                .setFooter({ text: FOOTER }),
+            ],
           })
           .catch(() => {});
       }
 
-      if (finishedCount >= racers.length) {
+      if (places.length && !raceFinalized) {
         raceFinalized = true;
         clearInterval(interval);
 
-        // Determine placements
-        const sorted = racers.slice().sort((a, b) => a.finishTick - b.finishTick);
-        const place = sorted.findIndex((r) => r.key === bet.key) + 1;
+        const your = places.find((r) => r.key === bet.key);
+        const truePlace = your.place;
+        const winnings = tier.payouts[truePlace] || 0;
 
-        const payout = tier.payouts[place] || 0;
-        if (payout > 0 && !settings.freezePayouts) {
-          await enqueuePayout(interaction.guild, userId, payout);
-          st.totalWon += payout;
+        const photoFinish = places[0].finishTick === places[1].finishTick;
+
+        if (truePlace === 1) {
+          st.winStreak = (st.winStreak || 0) + 1;
+          st.bestWinStreak = Math.max(st.bestWinStreak || 0, st.winStreak);
+        } else {
+          st.winStreak = 0;
         }
 
-        const bestBefore = st.bestFinish || 99;
-        st.bestFinish = Math.min(bestBefore, place);
-        st.podiums += place <= 3 ? 1 : 0;
-
-        // streaks
-        if (place === 1) st.winStreak += 1;
-        else st.winStreak = 0;
-        st.bestWinStreak = Math.max(st.bestWinStreak || 0, st.winStreak || 0);
-
-        // achievements
-        const earned = [];
-        if (st.races === 1) earned.push(awardAchievement(userId, ACH.FIRST_RACE.key));
-        if (place === 1) earned.push(awardAchievement(userId, ACH.FIRST_WIN.key));
-        if (place === 1 && sorted[1] && sorted[1].finishTick - sorted[0].finishTick <= 1) {
-          earned.push(awardAchievement(userId, ACH.PHOTO_FINISH.key));
-        }
-        if (st.winStreak >= 3) earned.push(awardAchievement(userId, ACH.STREAK_3.key));
-        if (st.podiums >= 5) earned.push(awardAchievement(userId, ACH.PODIUM_5.key));
-
+        st.bestFinish = Math.min(st.bestFinish, truePlace);
+        if (truePlace === 1) st.wins += 1;
+        if (truePlace <= 3) st.podiums += 1;
+        st.totalWon += winnings;
         saveStats();
-        saveTokens();
 
-        const results = sorted
-          .map((r, i) => {
-            const isYou = r.key === bet.key;
-            const badge = placeBadge(i + 1);
-            const tagLabel = isYou ? `**${bet.label} (You)**` : `${r.label}`;
-            return `${badge} ${tagLabel}`;
-          })
-          .join("\n");
+        const awarded = [];
+        if (st.races === 1) {
+          const a = awardAchievement(userId, ACH.FIRST_RACE.key);
+          if (a) awarded.push(a);
+        }
+        if (truePlace === 1) {
+          const a = awardAchievement(userId, ACH.FIRST_WIN.key);
+          if (a) awarded.push(a);
+        }
+        if (photoFinish) {
+          const a = awardAchievement(userId, ACH.PHOTO_FINISH.key);
+          if (a) awarded.push(a);
+        }
+        if ((st.winStreak || 0) >= 3) {
+          const a = awardAchievement(userId, ACH.STREAK_3.key);
+          if (a) awarded.push(a);
+        }
+        if ((st.podiums || 0) >= 5) {
+          const a = awardAchievement(userId, ACH.PODIUM_5.key);
+          if (a) awarded.push(a);
+        }
 
-        const winLose =
-          place === 1
-            ? `🎉 **WINNER!** You won **${payout.toLocaleString()} ${CURRENCY_NAME}**`
-            : payout > 0
-            ? `✅ You finished **#${place}** and won **${payout.toLocaleString()} ${CURRENCY_NAME}**`
-            : `❌ You finished **#${place}** and won nothing.`;
+        if (winnings > 0 && !settings.freezePayouts) {
+          await enqueuePayout(interaction.guild, userId, winnings);
+        }
 
-        const earnedLines = earned.filter(Boolean).map((a) => `🏅 **${a.name}** (+${a.tokens} token${a.tokens > 1 ? "s" : ""})`);
-        const earnedText = earnedLines.length ? `\n\n${earnedLines.join("\n")}` : "";
+        // placements emoji-only
+        const results = places.map((p) => `${placeBadge(p.place)} ${p.label}`).join("\n");
+
+        const resultLine =
+          winnings > 0
+            ? `🎉 ${tag(userId)} your ${bet.label} finished **${placeBadge(truePlace)}**!\n✅ Kaos payout queued: **${winnings.toLocaleString()} ${CURRENCY_NAME}**`
+            : `😢 ${tag(userId)} your ${bet.label} finished **${placeBadge(truePlace)}**.\nNo payout this time.`;
+
+        // clean achievements heading + grammar
+        const achBlock = awarded.length
+          ? `\n\n🏅 **Achievements unlocked:**\n${awarded
+              .map((a) => `• **${a.name}** (+${a.tokens} ${a.tokens === 1 ? "token" : "tokens"})`)
+              .join("\n")}`
+          : "";
 
         await msg
-          .edit({
+          .reply({
             embeds: [
               new EmbedBuilder()
-                .setColor(place === 1 ? COLOR_ACCENT : COLOR_NEUTRAL)
-                .setTitle(`🏁 ${BRAND} — RACE COMPLETE`)
+                .setColor(winnings > 0 ? COLOR_PRIMARY : COLOR_DARK)
+                .setTitle(`🏆 ${BRAND} — SOLO RESULT`)
                 .setDescription(
-                  `${header("RESULTS")}\n\n` +
-                    `🎯 **Your RHIB:** ${bet.label}\n` +
-                    `${tier.emoji} **Tier:** ${tier.label}\n` +
-                    `${winLose}\n\n` +
-                    results +
-                    earnedText
+                  `${header("RACE COMPLETE")}\n\n` +
+                    `${resultLine}\n` +
+                    (photoFinish ? `\n📸 **PHOTO FINISH!** VAR called.\n` : "\n") +
+                    `**Placements:**\n${results}` +
+                    achBlock
                 )
                 .setFooter({ text: FOOTER }),
             ],
           })
           .catch(() => {});
 
-        // cleanup
-        activeSoloRace.delete(userId);
-        const current = activeSoloRaceByGuild.get(guildId) || 1;
-        activeSoloRaceByGuild.set(guildId, Math.max(0, current - 1));
+        await auditLog(
+          interaction.guild,
+          new EmbedBuilder()
+            .setColor(COLOR_NEUTRAL)
+            .setTitle(`🧾 Audit • SOLO • Season #${statsDB.meta.seasonNumber}`)
+            .addFields(
+              { name: "Player", value: `${tag(userId)} (${userId})`, inline: false },
+              { name: "Tier", value: `${tier.emoji} ${tier.label} (cost ${tier.tokenCost})`, inline: true },
+              { name: "RHIB", value: `${bet.label}`, inline: true },
+              { name: "Finish", value: `${placeBadge(truePlace)} (${truePlace})`, inline: true },
+              {
+                name: "Payout",
+                value: settings.freezePayouts ? "FROZEN" : `${winnings.toLocaleString()} ${CURRENCY_NAME}`,
+                inline: true,
+              },
+              { name: "Win Streak", value: `${st.winStreak || 0}`, inline: true },
+              { name: "Seed", value: `${seed}`, inline: true }
+            )
+            .setFooter({ text: FOOTER })
+        );
       }
     } catch (e) {
       raceFinalized = true;
       clearInterval(interval);
-      activeSoloRace.delete(userId);
-      const current = activeSoloRaceByGuild.get(guildId) || 1;
-      activeSoloRaceByGuild.set(guildId, Math.max(0, current - 1));
       console.log("Solo race error:", e?.message || e);
+    } finally {
+      if (raceFinalized) {
+        activeSoloRace.delete(userId);
+        const cur = activeSoloRaceByGuild.get(guildId) || 0;
+        activeSoloRaceByGuild.set(guildId, Math.max(0, cur - 1));
+      }
     }
   }, TICK_MS);
 }
 
-// ================== PARTY RACE ==================
-const partyByGuild = new Map(); // guildId -> party
+// ================== PARTY ==================
+const partyByGuild = new Map();
+
 function makeParty(hostId, channelId, tierKey) {
   return {
     hostId,
-    channelId,
-    tierKey,
-    players: new Map(), // userId -> {colourKey}
-    createdAt: Date.now(),
-    autoStartTimeout: null,
+    createdAt: nowSec(),
     state: "LOBBY",
+    finalized: false,
+    players: new Map(), // uid -> { colourKey }
+    messageId: null,
+    channelId,
+    tierKey: tierKey || "standard",
+    autoStartTimeout: null,
+    seed: newSeed(),
   };
 }
+
 function colourTaken(party, colourKey) {
   for (const p of party.players.values()) if (p.colourKey === colourKey) return true;
   return false;
 }
-function getPartyEmbed(guild, party) {
+
+async function getPartyMessage(guild, party) {
+  if (!party.channelId || !party.messageId) return { channel: null, message: null };
+
+  const channel = await guild.channels.fetch(party.channelId).catch(() => null);
+  if (!channel || !("messages" in channel)) return { channel: null, message: null };
+
+  const message = await channel.messages.fetch(party.messageId).catch(() => null);
+  return { channel, message };
+}
+
+async function editOrPostPartyEmbed(interaction, party) {
   const tier = TIERS[party.tierKey] || TIERS.standard;
 
-  const players = Array.from(party.players.entries()).map(([uid, p]) => {
+  // lineup emoji-only + host crown + slots left
+  const lineup = Array.from(party.players.entries()).map(([uid, p]) => {
     const c = COLOUR_BY_KEY.get(p.colourKey);
-    return `• ${tag(uid)} — ${c ? c.label : p.colourKey}`;
+    const crown = uid === party.hostId ? " 👑" : "";
+    return `${c.label} ${tag(uid)}${crown}`;
   });
 
-  return new EmbedBuilder()
-    .setColor(COLOR_PRIMARY)
-    .setTitle(`👥 ${BRAND} — PARTY LOBBY`)
-    .setDescription(
-      `${header("PARTY LOBBY")}\n\n` +
-        `🎯 **Tier:** ${tier.emoji} ${tier.label}\n` +
-        `🧑‍✈️ **Host:** ${tag(party.hostId)}\n` +
-        `👥 **Players (${party.players.size}/5):**\n` +
-        (players.length ? players.join("\n") : "_None yet_") +
-        `\n\n` +
-        `Use \`/raceparty join\` to enter. Auto-starts in 60s.`
-    )
+  const timeLeft = Math.max(0, party.createdAt + 60 - nowSec());
+  const autoLine = party.state === "LOBBY" ? `⏱️ **Auto-start:** <t:${nowSec() + timeLeft}:R>` : "";
+  const slotsLeft = Math.max(0, 5 - party.players.size);
+
+  const desc =
+    `${header("PARTY LOBBY — UNIQUE COLOURS")}\n\n` +
+    `👑 **Host:** ${tag(party.hostId)}\n` +
+    `${tier.emoji} **Tier:** ${tier.label} • Entry: **${tier.tokenCost} token(s)**\n` +
+    `👥 **Players:** \`${party.players.size}\` / 5 • **Slots left:** \`${slotsLeft}\`\n` +
+    `${autoLine}\n\n` +
+    `**Line-up:**\n${lineup.length ? lineup.join("\n") : "`No racers yet.`"}\n\n` +
+    `✅ **Join:** \`/raceparty join colour:<colour>\`\n` +
+    `🚪 **Leave:** \`/raceparty leave\`\n` +
+    `🏁 **Start now:** \`/raceparty start\` (host)\n` +
+    `🧹 **Cancel:** \`/raceparty cancel\` (host)`;
+
+  const e = new EmbedBuilder()
+    .setColor(COLOR_ACCENT)
+    .setTitle(`🏟️ ${BRAND} — PARTY RHIB RACE`)
+    .setDescription(desc)
     .setFooter({ text: FOOTER });
-}
-async function editOrPostPartyEmbed(interaction, party) {
-  const guild = interaction.guild;
-  const channel = interaction.channel;
-  if (!guild || !channel) return;
 
-  const embed = getPartyEmbed(guild, party);
-  const msgId = party.messageId;
-
-  try {
-    if (msgId) {
-      const msg = await channel.messages.fetch(msgId).catch(() => null);
-      if (msg) {
-        await msg.edit({ embeds: [embed] });
-        return;
-      }
-    }
-    const newMsg = await channel.send({ embeds: [embed] });
-    party.messageId = newMsg.id;
-  } catch {}
-}
-async function cancelParty(guild, party, reason) {
-  party.state = "CANCELLED";
-  if (party.autoStartTimeout) clearTimeout(party.autoStartTimeout);
-  const channel = await guild.channels.fetch(party.channelId).catch(() => null);
-  if (channel && "send" in channel) {
-    await channel.send({ content: `❌ Party cancelled. ${reason || ""}` }).catch(() => {});
+  if (!party.messageId) {
+    const msg = await interaction.reply({ embeds: [e], fetchReply: true });
+    party.messageId = msg.id;
+    party.channelId = interaction.channelId;
+    return;
   }
+
+  const { message } = await getPartyMessage(interaction.guild, party);
+  if (message) await message.edit({ embeds: [e] }).catch(() => {});
+}
+
+async function cancelParty(guild, party, reason) {
+  const { message } = await getPartyMessage(guild, party);
+  const e = new EmbedBuilder()
+    .setColor(COLOR_DARK)
+    .setTitle(`🧹 ${BRAND} — PARTY CLOSED`)
+    .setDescription(`${header("LOBBY ENDED")}\n\n${reason}`)
+    .setFooter({ text: FOOTER });
+
+  if (message) await message.edit({ embeds: [e] }).catch(() => {});
+  if (party.autoStartTimeout) clearTimeout(party.autoStartTimeout);
   partyByGuild.delete(guild.id);
 }
+
 async function runPartyRace(guild, party) {
-  if (party.state !== "LOBBY") return;
-  if (party.players.size < 2) {
-    await cancelParty(guild, party, "Need at least 2 players.");
-    return;
-  }
+  if (settings.freezeRaces) return;
+  seasonCheckAndResetIfNeeded();
 
-  party.state = "RUNNING";
-  if (party.autoStartTimeout) clearTimeout(party.autoStartTimeout);
+  if (party.state !== "LOBBY" || party.finalized) return;
 
-  const channel = await guild.channels.fetch(party.channelId).catch(() => null);
-  if (!channel || !("send" in channel)) {
-    partyByGuild.delete(guild.id);
-    return;
-  }
-
-  // charge tokens upfront
   const tier = TIERS[party.tierKey] || TIERS.standard;
-  for (const [uid] of party.players.entries()) {
-    const u = getTok(uid);
-    if (u.tokens < tier.tokenCost) {
-      await channel
-        .send({
-          content: `❌ Party canceled — ${tag(uid)} lacks ${tier.tokenCost} token(s).`,
-        })
-        .catch(() => {});
-      partyByGuild.delete(guild.id);
-      return;
-    }
-  }
-  for (const [uid] of party.players.entries()) {
-    getTok(uid).tokens -= tier.tokenCost;
-    saveTokens();
-    setCooldown(lastPartyPlay, uid);
+
+  if (party.players.size < 2) {
+    await cancelParty(guild, party, "Not enough racers joined in time. (Need **2+** to start)");
+    return;
   }
 
-  // seeded RNG per party
-  const seed = newSeed();
+  // seeded RNG for party race
+  const seed = party.seed || newSeed();
   const rng = makeRng(seed);
 
+  // Audit: log seed (party)
   await auditLog(
     guild,
     new EmbedBuilder()
@@ -891,52 +931,88 @@ async function runPartyRace(guild, party) {
       .setFooter({ text: FOOTER })
   );
 
-  const racers = Array.from(party.players.entries()).map(([uid, p]) => ({
-    uid,
-    ...COLOUR_BY_KEY.get(p.colourKey),
+  // re-check everyone at start (still important)
+  for (const uid of party.players.keys()) {
+    const left = onCooldown(lastPartyPlay, uid, PARTY_COOLDOWN_SEC);
+    if (left) {
+      await cancelParty(guild, party, "Someone was on cooldown. Try again later.");
+      return;
+    }
+    if (getTok(uid).tokens < tier.tokenCost) {
+      await cancelParty(guild, party, `Someone did not have enough tokens for **${tier.label}** tier.`);
+      return;
+    }
+  }
+
+  for (const uid of party.players.keys()) {
+    getTok(uid).tokens -= tier.tokenCost;
+    setCooldown(lastPartyPlay, uid);
+    getStats(uid).races += 1;
+  }
+  saveTokens();
+  saveStats();
+
+  party.state = "RUNNING";
+  if (party.autoStartTimeout) clearTimeout(party.autoStartTimeout);
+
+  let { channel: lobbyChannel, message: lobbyMsg } = await getPartyMessage(guild, party);
+
+  if (!lobbyChannel) {
+    lobbyChannel = await guild.channels.fetch(party.channelId).catch(() => null);
+  }
+  if (lobbyChannel && !lobbyMsg) {
+    const created = await lobbyChannel
+      .send({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(COLOR_PRIMARY)
+            .setTitle(`🏁 ${BRAND} — PARTY LIVE TRACK FEED`)
+            .setDescription(`${header("MULTIPLAYER LIVE")}\n\n(Starting...)`)
+            .setFooter({ text: FOOTER }),
+        ],
+      })
+      .catch(() => null);
+
+    if (created) {
+      party.messageId = created.id;
+      lobbyMsg = created;
+    }
+  }
+
+  if (lobbyMsg) {
+    const cin = new EmbedBuilder()
+      .setColor(COLOR_NEUTRAL)
+      .setTitle(`🎬 ${BRAND} — Race Cinematic`)
+      .setDescription(`${CINEMATIC.join("\n")}\n\n🏁 **LAUNCH!**`)
+      .setFooter({ text: FOOTER });
+
+    await lobbyMsg.edit({ embeds: [cin] }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 900));
+  }
+
+  const racers = COLOURS.map((c) => ({
+    ...c,
     pos: 0,
     finished: false,
     finishTick: null,
     lastEvent: null,
   }));
 
-  // stats
-  for (const r of racers) {
-    const s = getStats(r.uid);
-    s.races += 1;
-  }
-  saveStats();
-
-  const msg = await channel.send({
-    embeds: [
-      new EmbedBuilder()
-        .setColor(COLOR_PRIMARY)
-        .setTitle(`🏁 ${BRAND} — PARTY RHIB RACE`)
-        .setDescription(
-          `${header("PARTY STARTED")}\n\n` +
-            `🎯 **Tier:** ${tier.emoji} ${tier.label}\n` +
-            `👥 **Players:** ${racers.map((r) => tag(r.uid)).join(", ")}\n\n` +
-            `💰 **Winnings:**\n${payoutTableText(tier)}`
-        )
-        .setFooter({ text: FOOTER }),
-    ],
-  });
-
   let finishedCount = 0;
   let tick = 0;
-  let raceFinalized = false;
   let lastFrameKey = "";
 
   const interval = setInterval(async () => {
     try {
-      if (raceFinalized) return;
+      if (party.finalized) return;
+
       tick++;
 
       const order = racers.slice().sort((a, b) => b.pos - a.pos);
-      const rankMap = new Map(order.map((r) => [r.uid, i]));
+      const rankMap = new Map(order.map((r, i) => [r.key, i]));
 
       const rhibEmoji = getRhibEmoji(guild);
-      const commentary = rng() < 0.18 ? rand(COMMENTARY, rng) : null;
+      const commentary = rng() < 0.2 ? rand(COMMENTARY, rng) : null;
 
       for (const r of racers) {
         if (r.finished) continue;
@@ -949,17 +1025,22 @@ async function runPartyRace(guild, party) {
         if (ev?.kind === "BOOST") step += 1;
         if (ev?.kind === "STALL") step = Math.max(0, step - 1);
 
-        const rk = rankMap.get(r.uid) ?? 2;
+        const rk = rankMap.get(r.key) ?? 2;
         step += houseEdgeModifier(rk, racers.length, tier.key, rng);
         step += finalSprintBoost(r.pos, rng);
 
-        const st = getStats(r.uid);
-        step += streakPenalty(st.winStreak, tier.key, rng);
+        // streak penalty for the player who chose this colour
+        const playerEntry = Array.from(party.players.entries()).find(([, p]) => p.colourKey === r.key);
+        if (playerEntry) {
+          const [uid] = playerEntry;
+          const s = getStats(uid);
+          step += streakPenalty(s.winStreak, tier.key, rng);
+        }
 
         step = Math.max(0, Math.min(3, step));
         r.pos += step;
 
-        if (r.pos >= TRACK_LEN - 1) {
+        if (r.pos >= TRACK_LEN) {
           r.pos = TRACK_LEN - 1;
           r.finished = true;
           r.finishTick = tick;
@@ -967,80 +1048,161 @@ async function runPartyRace(guild, party) {
         }
       }
 
-      const lines = racers
-        .slice()
-        .sort((a, b) => b.pos - a.pos)
-        .map((r) => renderLine(r, r.pos, r.finished ? placeBadge(r.finishTick) : "", rhibEmoji));
-
-      const desc =
-        `${header("RACE IN PROGRESS")}\n\n` +
-        `🎯 **Tier:** ${tier.emoji} ${tier.label}\n` +
-        `👥 **Players:** ${racers.map((r) => tag(r.uid)).join(", ")}\n\n` +
-        lines.join("\n") +
-        (commentary ? `\n\n${commentary}` : "");
-
-      if (desc !== lastFrameKey) {
-        lastFrameKey = desc;
-        await msg
-          .edit({
-            embeds: [new EmbedBuilder().setColor(COLOR_PRIMARY).setTitle(`🏁 ${BRAND} — PARTY RHIB RACE`).setDescription(desc).setFooter({ text: FOOTER })],
-          })
-          .catch(() => {});
+      let places = [];
+      if (finishedCount === racers.length) {
+        places = racers
+          .slice()
+          .sort((a, b) => a.finishTick - b.finishTick || b.pos - a.pos)
+          .map((r, i) => ({ ...r, place: i + 1 }));
       }
 
-      if (finishedCount >= racers.length) {
-        raceFinalized = true;
+      const lines = (places.length ? places : racers).map((r) => {
+        const badge = places.length ? placeBadge(r.place) : `(${pct(r.pos)}%)`;
+        return renderLine(r, r.pos, badge, rhibEmoji);
+      });
+
+      const lineup = Array.from(party.players.entries())
+        .map(([uid, p]) => {
+          const c = COLOUR_BY_KEY.get(p.colourKey);
+          const crown = uid === party.hostId ? " 👑" : "";
+          return `${c.label} ${tag(uid)}${crown}`;
+        })
+        .join("\n");
+
+      const comms = racers
+        .filter((r) => r.lastEvent)
+        .slice(0, 2)
+        .map((r) => `${r.label} ${r.lastEvent}`)
+        .join("\n");
+
+      const frameKey = `${lines.join("|")}__${lineup}__${comms}__${commentary || ""}`;
+      if (lobbyMsg && frameKey !== lastFrameKey) {
+        lastFrameKey = frameKey;
+
+        const e = new EmbedBuilder()
+          .setColor(COLOR_PRIMARY)
+          .setTitle(`🏁 ${BRAND} — PARTY LIVE TRACK FEED`)
+          .setDescription(
+            `${header("MULTIPLAYER LIVE")}\n\n` +
+              `${tier.emoji} **Tier:** ${tier.label}\n\n` +
+              `**Line-up:**\n${lineup}\n\n` +
+              `🏁 **Track:**\n${lines.join("\n")}\n\n` +
+              `📡 **Comms:**\n${comms || "`Engines roaring…`"}\n` +
+              (commentary ? `\n${commentary}` : "")
+          )
+          .setFooter({ text: FOOTER });
+
+        await lobbyMsg.edit({ embeds: [e] }).catch(() => {});
+      }
+
+      if (places.length && !party.finalized) {
+        party.finalized = true;
         clearInterval(interval);
 
-        const sorted = racers.slice().sort((a, b) => a.finishTick - b.finishTick);
+        const photoFinish = places[0].finishTick === places[1].finishTick;
+        const placeByKey = new Map(places.map((p) => [p.key, p.place]));
 
-        const results = sorted
-          .map((r, i) => `${placeBadge(i + 1)} ${tag(r.uid)} — ${r.label}`)
-          .join("\n");
+        const placementSummary = [];
+        const payoutSummary = [];
+        const auditPayoutLines = [];
+        const awardedLines = [];
 
-        // payouts + stats
-        sorted.forEach((r, i) => {
-          const place = i + 1;
-          const payout = tier.payouts[place] || 0;
-          const st = getStats(r.uid);
+        for (const [uid, p] of party.players.entries()) {
+          const truePlace = placeByKey.get(p.colourKey);
+          const amount = tier.payouts[truePlace] || 0;
+          const c = COLOUR_BY_KEY.get(p.colourKey);
+          const s = getStats(uid);
 
-          if (payout > 0 && !settings.freezePayouts) {
-            enqueuePayout(guild, r.uid, payout);
-            st.totalWon += payout;
+          if (truePlace === 1) {
+            s.winStreak = (s.winStreak || 0) + 1;
+            s.bestWinStreak = Math.max(s.bestWinStreak || 0, s.winStreak);
+          } else {
+            s.winStreak = 0;
           }
 
-          st.bestFinish = Math.min(st.bestFinish || 99, place);
-          st.podiums += place <= 3 ? 1 : 0;
+          s.bestFinish = Math.min(s.bestFinish, truePlace);
+          if (truePlace === 1) s.wins += 1;
+          if (truePlace <= 3) s.podiums += 1;
+          s.totalWon += amount;
 
-          if (place === 1) st.winStreak += 1;
-          else st.winStreak = 0;
-          st.bestWinStreak = Math.max(st.bestWinStreak || 0, st.winStreak || 0);
-        });
+          // achievements
+          const got = [];
+          if (s.races === 1) {
+            const a = awardAchievement(uid, ACH.FIRST_RACE.key);
+            if (a) got.push(a);
+          }
+          if (truePlace === 1) {
+            const a = awardAchievement(uid, ACH.FIRST_WIN.key);
+            if (a) got.push(a);
+            const b = awardAchievement(uid, ACH.PARTY_WIN.key);
+            if (b) got.push(b);
+          }
+          if (photoFinish) {
+            const a = awardAchievement(uid, ACH.PHOTO_FINISH.key);
+            if (a) got.push(a);
+          }
+          if ((s.winStreak || 0) >= 3) {
+            const a = awardAchievement(uid, ACH.STREAK_3.key);
+            if (a) got.push(a);
+          }
+          if ((s.podiums || 0) >= 5) {
+            const a = awardAchievement(uid, ACH.PODIUM_5.key);
+            if (a) got.push(a);
+          }
 
-        // achievements
-        const winner = sorted[0];
-        if (winner) {
-          const st = getStats(winner.uid);
-          const earned = [];
-          earned.push(awardAchievement(winner.uid, ACH.FIRST_WIN.key));
-          earned.push(awardAchievement(winner.uid, ACH.PARTY_WIN.key));
-          if (st.winStreak >= 3) earned.push(awardAchievement(winner.uid, ACH.STREAK_3.key));
-          if (st.podiums >= 5) earned.push(awardAchievement(winner.uid, ACH.PODIUM_5.key));
-          saveStats();
-          saveTokens();
+          if (got.length) {
+            awardedLines.push(
+              `${c.label} ${tag(uid)}: ${got
+                .map((a) => `**${a.name}** (+${a.tokens} ${a.tokens === 1 ? "token" : "tokens"})`)
+                .join(", ")}`
+            );
+          }
+
+          if (amount > 0 && !settings.freezePayouts) {
+            await enqueuePayout(guild, uid, amount);
+          }
+
+          placementSummary.push(`${placeBadge(truePlace)} ${c.label} ${tag(uid)}`);
+          payoutSummary.push(`${c.label} ${tag(uid)} → **${amount.toLocaleString()} ${CURRENCY_NAME}**`);
+          auditPayoutLines.push(`${uid}:${amount}`);
         }
 
-        await msg
-          .edit({
-            embeds: [
-              new EmbedBuilder()
-                .setColor(COLOR_ACCENT)
-                .setTitle(`🏁 ${BRAND} — PARTY RESULTS`)
-                .setDescription(`${header("RESULTS")}\n\n${results}`)
-                .setFooter({ text: FOOTER }),
-            ],
-          })
-          .catch(() => {});
+        saveStats();
+
+        const endEmbed = new EmbedBuilder()
+          .setColor(COLOR_ACCENT)
+          .setTitle(`🏆 ${BRAND} — PARTY RESULTS`)
+          .setDescription(
+            `${header("RACE COMPLETE")}\n\n` +
+              `${tier.emoji} **Tier:** ${tier.label}\n` +
+              (photoFinish ? `📸 **PHOTO FINISH!** VAR called.\n\n` : "\n") +
+              `**Placements:**\n${placementSummary.join("\n")}\n\n` +
+              `**Payouts (Kaos queued):**\n${payoutSummary.join("\n")}\n` +
+              (awardedLines.length ? `\n🏅 **Achievements:**\n${awardedLines.join("\n")}\n` : "\n") +
+              `Create a new lobby with \`/raceparty create\`.`
+          )
+          .setFooter({ text: FOOTER });
+
+        if (lobbyMsg) await lobbyMsg.edit({ embeds: [endEmbed] }).catch(() => {});
+
+        await auditLog(
+          guild,
+          new EmbedBuilder()
+            .setColor(COLOR_NEUTRAL)
+            .setTitle(`🧾 Audit • PARTY • Season #${statsDB.meta.seasonNumber}`)
+            .addFields(
+              { name: "Tier", value: `${tier.emoji} ${tier.label} (cost ${tier.tokenCost})`, inline: true },
+              { name: "Host", value: `${tag(party.hostId)} (${party.hostId})`, inline: true },
+              { name: "Players", value: `${party.players.size}`, inline: true },
+              { name: "Seed", value: `${seed}`, inline: true },
+              {
+                name: "Payouts",
+                value: settings.freezePayouts ? "FROZEN" : auditPayoutLines.join("\n") || "None",
+                inline: false,
+              }
+            )
+            .setFooter({ text: FOOTER })
+        );
 
         partyByGuild.delete(guild.id);
       }
@@ -1072,6 +1234,7 @@ function formatTop(arr, field, label) {
     })
     .join("\n");
 }
+
 /* ================== COMMANDS ================== */
 const colourChoices = COLOURS.map((c) => ({ name: `${c.name} ${c.label}`, value: c.key }));
 const tierChoices = [
@@ -1165,16 +1328,7 @@ const commandsDef = [
 ];
 
 /* ================== TICKETS ================== */
-const TICKETS = createTicketSystem(client, commandsDef);
-
-// ✅ Suggestions system (premium panel + threads + voting)
-const SUGGESTIONS = createSuggestionSystem(client, commandsDef, {
-  BRAND,
-  FOOTER,
-  COLOR_PRIMARY,
-  COLOR_ACCENT,
-  COLOR_NEUTRAL,
-});
+const TICKETS = initTicketSystem(client, commandsDef);
 
 // ✅ This is what gets deployed to Discord
 const commands = commandsDef.map((c) => c.toJSON());
@@ -1208,10 +1362,6 @@ client.on("interactionCreate", async (interaction) => {
     // ✅ Let ticket system handle /ticketpanel + buttons + modals
     const handledByTickets = await TICKETS.handleInteraction(interaction);
     if (handledByTickets) return;
-
-    // ✅ Let suggestions system handle panel/buttons/modals
-    const handledBySuggestions = await SUGGESTIONS.handleInteraction(interaction);
-    if (handledBySuggestions) return;
 
     if (!interaction.isChatInputCommand()) return;
 
