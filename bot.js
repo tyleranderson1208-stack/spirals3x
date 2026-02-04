@@ -8,6 +8,8 @@ const crypto = require("crypto");
 
 const { initTicketSystem } = require("./tickets");
 const { createSuggestionSystem } = require("./suggestions");
+const { createVerifySystem } = require("./verify");
+const { createOnboardingSystem } = require("./onboarding");
 
 const {
   Client,
@@ -1328,6 +1330,29 @@ const commandsDef = [
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 ];
 
+// ✅ Verify system (adds /verifypanel + handles button)
+const VERIFY = createVerifySystem(client, commandsDef, {
+  brand: BRAND,
+  footer: FOOTER,
+  colorAccent: COLOR_ACCENT,
+  verifiedRoleId: process.env.VERIFIED_ROLE_ID || "",
+  rulesChannelId: process.env.RULES_CHANNEL_ID || "",
+});
+
+// ✅ Onboarding system (welcome + audit)
+const ONBOARDING = createOnboardingSystem(client, {
+  brand: BRAND,
+  footer: FOOTER,
+  colorPrimary: COLOR_PRIMARY,
+  colorAccent: COLOR_ACCENT,
+  colorNeutral: COLOR_NEUTRAL,
+  welcomeChannelId: process.env.WELCOME_CHANNEL_ID || "",
+  auditChannelId: process.env.WELCOME_AUDIT_CHANNEL_ID || "",
+  rulesChannelId: process.env.RULES_CHANNEL_ID || "",
+  welcomeGifUrl: process.env.WELCOME_GIF_URL || "",
+  welcomeDeleteAfterHours: process.env.WELCOME_DELETE_AFTER_HOURS || "24",
+});
+
 /* ================== SUGGESTIONS ================== */
 const SUGGESTIONS = createSuggestionSystem(client, commandsDef, {
   BRAND,
@@ -1356,6 +1381,7 @@ client.once("ready", async () => {
   seasonCheckAndResetIfNeeded();
   console.log(`✅ Online as ${client.user.tag}`);
   console.log(`Season #${statsDB.meta.seasonNumber} started: ${new Date(statsDB.meta.seasonStart).toISOString()}`);
+  ONBOARDING.register();
 
   // intent sanity check (giveall needs member fetch)
   try {
@@ -1370,6 +1396,9 @@ client.once("ready", async () => {
 
 client.on("interactionCreate", async (interaction) => {
   try {
+    // ✅ Verification panel + verify button handler
+    if (await VERIFY.handleInteraction(interaction)) return;
+
     // ✅ Let suggestions system handle /suggestionspanel + buttons + modals
     const handledBySuggestions = await SUGGESTIONS.handleInteraction(interaction);
     if (handledBySuggestions) return;
