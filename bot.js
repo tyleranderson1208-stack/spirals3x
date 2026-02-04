@@ -7,6 +7,7 @@ const path = require("path");
 const crypto = require("crypto");
 
 const { initTicketSystem } = require("./tickets");
+const { createSuggestionSystem } = require("./suggestions");
 
 const {
   Client,
@@ -1327,6 +1328,16 @@ const commandsDef = [
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 ];
 
+/* ================== SUGGESTIONS ================== */
+const SUGGESTIONS = createSuggestionSystem(client, commandsDef, {
+  BRAND,
+  FOOTER,
+  COLOR_PRIMARY,
+  COLOR_ACCENT,
+  COLOR_NEUTRAL,
+  DATA_DIR,
+});
+
 /* ================== TICKETS ================== */
 const TICKETS = initTicketSystem(client, commandsDef);
 
@@ -1359,6 +1370,10 @@ client.once("ready", async () => {
 
 client.on("interactionCreate", async (interaction) => {
   try {
+    // ✅ Let suggestions system handle /suggestionspanel + buttons + modals
+    const handledBySuggestions = await SUGGESTIONS.handleInteraction(interaction);
+    if (handledBySuggestions) return;
+
     // ✅ Let ticket system handle /ticketpanel + buttons + modals
     const handledByTickets = await TICKETS.handleInteraction(interaction);
     if (handledByTickets) return;
