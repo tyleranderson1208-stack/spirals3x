@@ -10,6 +10,7 @@ const { initTicketSystem } = require("./tickets");
 const { createSuggestionSystem } = require("./suggestions");
 const { createVerifySystem } = require("./verify");
 const { createOnboardingSystem } = require("./onboarding");
+const { createRulesMenuSystem } = require("./rulesmenu");
 
 const {
   Client,
@@ -1330,6 +1331,10 @@ const commandsDef = [
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 ];
 
+// ================== RULES MENU ==================
+const RULES = createRulesMenuSystem(client);
+commandsDef.push(...RULES.commands);
+
 // ✅ Verify system (adds /verifypanel + handles button)
 const VERIFY = createVerifySystem(client, commandsDef, {
   brand: BRAND,
@@ -1396,10 +1401,20 @@ client.once("ready", async () => {
 
 client.on("interactionCreate", async (interaction) => {
   try {
+    // ✅ Rules system (/rulesmenu + select + acknowledge)
+    const handledByRules = await RULES.handleInteraction(interaction);
+    if (handledByRules) return;
+
     // ✅ Verification panel + verify button handler
     if (await VERIFY.handleInteraction(interaction)) return;
 
     // ✅ Let suggestions system handle /suggestionspanel + buttons + modals
+    if (!RULES.requireAcknowledged(interaction, { allowIfNoMemberRoleId: false })) {
+      return interaction.reply({
+        content: "❌ Please read and acknowledge the rules first. Use `/rulesmenu`.",
+        ephemeral: true,
+      });
+    }
     const handledBySuggestions = await SUGGESTIONS.handleInteraction(interaction);
     if (handledBySuggestions) return;
 
