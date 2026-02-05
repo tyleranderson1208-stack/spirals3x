@@ -34,22 +34,33 @@ function buildPanelEmbed({
   memberRoleId,
   linkChannelId,
   rulesChannelId,
+  serverInfoChannelId,
+  ticketsChannelId,
+  announcementsChannelId,
+  wipeScheduleChannelId,
   gifUrl,
   brand,
 }) {
-  const roleLines = [getRoleMention(verifyRoleId)];
-  if (memberRoleId) roleLines.push(getRoleMention(memberRoleId));
+  const roleMentions = [getRoleMention(verifyRoleId)];
+  if (memberRoleId && memberRoleId !== verifyRoleId) {
+    roleMentions.push(getRoleMention(memberRoleId));
+  }
+  const roleLines = roleMentions.filter(Boolean);
 
   const afterLines = [];
-  if (linkChannelId) afterLines.push(`• Link Kaos in ${getChannelMention(linkChannelId)}`);
-  if (rulesChannelId) afterLines.push(`• Run \`/rulesmenu\` in ${getChannelMention(rulesChannelId)}`);
+  if (linkChannelId) afterLines.push(`• 🔗｜link ${getChannelMention(linkChannelId)}`);
+  if (rulesChannelId) afterLines.push(`• 📜｜rules ${getChannelMention(rulesChannelId)}`);
+  if (serverInfoChannelId) afterLines.push(`• ℹ️｜server-info ${getChannelMention(serverInfoChannelId)}`);
+  if (ticketsChannelId) afterLines.push(`• 🎫｜tickets ${getChannelMention(ticketsChannelId)}`);
+  if (announcementsChannelId) afterLines.push(`• 📢｜announcements ${getChannelMention(announcementsChannelId)}`);
+  if (wipeScheduleChannelId) afterLines.push(`• 🗓️｜wipe-schedule ${getChannelMention(wipeScheduleChannelId)}`);
 
   const embed = new EmbedBuilder()
     .setColor(colorAccent ?? DEFAULT_COLOR)
     .setTitle("🌀 Verification — Unlock SPIRALS 3X")
     .setDescription(
       `Welcome to **${brand}**.\nPress **Verify** below to unlock the server.\n\n` +
-        `**You’ll receive:**\n${roleLines.map((r) => `• ${r}`).join("\n")}\n\n` +
+        `**You’ll receive:**\n${roleLines.length ? roleLines.map((r) => `• ${r}`).join("\n") : "• Access granted."}\n\n` +
         `**After verification:**\n${afterLines.length ? afterLines.join("\n") : "• Follow the server setup steps."}`
     )
     .setFooter({ text: footerText || DEFAULT_FOOTER });
@@ -63,25 +74,31 @@ function buildNextStepsEmbed({
   footerText,
   linkChannelId,
   rulesChannelId,
+  serverInfoChannelId,
+  ticketsChannelId,
   announcementsChannelId,
   wipeScheduleChannelId,
 }) {
   const steps = [];
-  if (linkChannelId) steps.push(`1) Link Kaos in ${getChannelMention(linkChannelId)}`);
-  if (rulesChannelId) steps.push(`2) Run \`/rulesmenu\` in ${getChannelMention(rulesChannelId)}`);
-  if (announcementsChannelId) steps.push(`3) Updates in ${getChannelMention(announcementsChannelId)}`);
-  if (wipeScheduleChannelId) steps.push(`4) Wipe info in ${getChannelMention(wipeScheduleChannelId)}`);
+  if (linkChannelId) steps.push(`• Link in 🔗｜link ${getChannelMention(linkChannelId)} (Kaos)`);
+  if (rulesChannelId) steps.push(`• Read rules in 📜｜rules ${getChannelMention(rulesChannelId)}`);
+  if (serverInfoChannelId) steps.push(`• Learn server details in ℹ️｜server-info ${getChannelMention(serverInfoChannelId)}`);
+  if (announcementsChannelId) steps.push(`• Updates in 📢｜announcements ${getChannelMention(announcementsChannelId)}`);
+  if (wipeScheduleChannelId) steps.push(`• Wipe info in 🗓️｜wipe-schedule ${getChannelMention(wipeScheduleChannelId)}`);
+  if (ticketsChannelId) steps.push(`• Support in 🎫｜tickets ${getChannelMention(ticketsChannelId)}`);
 
   const nextSteps = steps.length ? steps.join("\n") : "Follow the server setup steps shared by staff.";
 
   return new EmbedBuilder()
     .setColor(colorAccent ?? DEFAULT_COLOR)
-    .setTitle("✅ Verified — Welcome to SPIRALS 3X")
+    .setTitle("🌀 The Spiral Has Chosen You")
     .setDescription(
-      "You are verified and roles have been applied.\n\n" +
-        "**Next steps (recommended):**\n" +
+      "Welcome to SPIRALS 3X.\n" +
+        "The threshold is behind you.\n" +
+        "Your role has been bound, and the spiral now recognizes you as one of its own.\n\n" +
+        "**Your next movements**\n" +
         `${nextSteps}\n\n` +
-        "If your roles are ever removed, you can press **Verify** again."
+        "If your role is ever removed, press Verify again."
     )
     .setFooter({ text: footerText || DEFAULT_FOOTER });
 }
@@ -96,6 +113,8 @@ function createVerifySystem(client, commandsDef, opts = {}) {
   const panelGifUrl = process.env.VERIFY_PANEL_GIF_URL || "";
   const linkChannelId = process.env.LINK_CHANNEL_ID || "";
   const rulesChannelId = process.env.RULES_CHANNEL_ID || "";
+  const serverInfoChannelId = process.env.SERVER_INFO_CHANNEL_ID || "";
+  const ticketsChannelId = process.env.TICKETS_CHANNEL_ID || "";
   const announcementsChannelId = process.env.ANNOUNCEMENTS_CHANNEL_ID || "";
   const wipeScheduleChannelId = process.env.WIPE_SCHEDULE_CHANNEL_ID || "";
 
@@ -121,6 +140,10 @@ function createVerifySystem(client, commandsDef, opts = {}) {
       memberRoleId,
       linkChannelId,
       rulesChannelId,
+      serverInfoChannelId,
+      ticketsChannelId,
+      announcementsChannelId,
+      wipeScheduleChannelId,
       gifUrl: panelGifUrl,
       brand,
     });
@@ -178,6 +201,8 @@ function createVerifySystem(client, commandsDef, opts = {}) {
       footerText,
       linkChannelId,
       rulesChannelId,
+      serverInfoChannelId,
+      ticketsChannelId,
       announcementsChannelId,
       wipeScheduleChannelId,
     });
