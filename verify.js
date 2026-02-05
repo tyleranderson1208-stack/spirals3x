@@ -13,10 +13,6 @@ const {
 const DEFAULT_COLOR = 0xb100ff;
 const DEFAULT_FOOTER = "🌀 SPIRALS 3X • Verification Protocol";
 
-function getRoleMention(roleId) {
-  return roleId ? `<@&${roleId}>` : "";
-}
-
 function getChannelMention(channelId) {
   return channelId ? `<#${channelId}>` : "";
 }
@@ -32,36 +28,16 @@ function buildPanelEmbed({
   footerText,
   verifyRoleId,
   memberRoleId,
-  linkChannelId,
-  rulesChannelId,
-  serverInfoChannelId,
-  ticketsChannelId,
-  announcementsChannelId,
-  wipeScheduleChannelId,
   gifUrl,
-  brand,
 }) {
-  const roleMentions = [getRoleMention(verifyRoleId)];
-  if (memberRoleId && memberRoleId !== verifyRoleId) {
-    roleMentions.push(getRoleMention(memberRoleId));
-  }
-  const roleLines = roleMentions.filter(Boolean);
-
-  const afterLines = [];
-  if (linkChannelId) afterLines.push(`• 🔗｜link ${getChannelMention(linkChannelId)}`);
-  if (rulesChannelId) afterLines.push(`• 📜｜rules ${getChannelMention(rulesChannelId)}`);
-  if (serverInfoChannelId) afterLines.push(`• ℹ️｜server-info ${getChannelMention(serverInfoChannelId)}`);
-  if (ticketsChannelId) afterLines.push(`• 🎫｜tickets ${getChannelMention(ticketsChannelId)}`);
-  if (announcementsChannelId) afterLines.push(`• 📢｜announcements ${getChannelMention(announcementsChannelId)}`);
-  if (wipeScheduleChannelId) afterLines.push(`• 🗓️｜wipe-schedule ${getChannelMention(wipeScheduleChannelId)}`);
-
   const embed = new EmbedBuilder()
     .setColor(colorAccent ?? DEFAULT_COLOR)
-    .setTitle("🌀 Verification — Unlock SPIRALS 3X")
+    .setTitle("🌀 The Threshold — SPIRALS 3X")
     .setDescription(
-      `Welcome to **${brand}**.\nPress **Verify** below to unlock the server.\n\n` +
-        `**You’ll receive:**\n${roleLines.length ? roleLines.map((r) => `• ${r}`).join("\n") : "• Access granted."}\n\n` +
-        `**After verification:**\n${afterLines.length ? afterLines.join("\n") : "• Follow the server setup steps."}`
+      "Welcome to SPIRALS 3X.\n\n" +
+        "You’re standing at the edge of the Spiral.\n" +
+        "Press Verify to step through and unlock the server.\n\n" +
+        "If you ever lose access, return here and press Verify again."
     )
     .setFooter({ text: footerText || DEFAULT_FOOTER });
 
@@ -80,31 +56,30 @@ function buildNextStepsEmbed({
   wipeScheduleChannelId,
 }) {
   const steps = [];
-  if (linkChannelId) steps.push(`• Link in 🔗｜link ${getChannelMention(linkChannelId)} (Kaos)`);
-  if (rulesChannelId) steps.push(`• Read rules in 📜｜rules ${getChannelMention(rulesChannelId)}`);
-  if (serverInfoChannelId) steps.push(`• Learn server details in ℹ️｜server-info ${getChannelMention(serverInfoChannelId)}`);
-  if (announcementsChannelId) steps.push(`• Updates in 📢｜announcements ${getChannelMention(announcementsChannelId)}`);
-  if (wipeScheduleChannelId) steps.push(`• Wipe info in 🗓️｜wipe-schedule ${getChannelMention(wipeScheduleChannelId)}`);
-  if (ticketsChannelId) steps.push(`• Support in 🎫｜tickets ${getChannelMention(ticketsChannelId)}`);
+  if (linkChannelId) steps.push(`• Link your in-game name with Kaos in ${getChannelMention(linkChannelId)}`);
+  if (rulesChannelId) steps.push(`• Read the rules in ${getChannelMention(rulesChannelId)}`);
+  if (serverInfoChannelId) steps.push(`• Learn server details in ${getChannelMention(serverInfoChannelId)}`);
+  if (announcementsChannelId) steps.push(`• Updates in ${getChannelMention(announcementsChannelId)}`);
+  if (wipeScheduleChannelId) steps.push(`• Wipe info in ${getChannelMention(wipeScheduleChannelId)}`);
+  if (ticketsChannelId) steps.push(`• Support in ${getChannelMention(ticketsChannelId)}`);
 
   const nextSteps = steps.length ? steps.join("\n") : "Follow the server setup steps shared by staff.";
 
   return new EmbedBuilder()
     .setColor(colorAccent ?? DEFAULT_COLOR)
-    .setTitle("🌀 The Spiral Has Chosen You")
+    .setTitle("✅ Marked by the Spiral")
     .setDescription(
       "Welcome to SPIRALS 3X.\n" +
         "The threshold is behind you.\n" +
         "Your role has been bound, and the spiral now recognizes you as one of its own.\n\n" +
         "**Your next movements**\n" +
         `${nextSteps}\n\n` +
-        "If your role is ever removed, press Verify again."
+        "If your roles are ever removed, come back and press Verify again."
     )
     .setFooter({ text: footerText || DEFAULT_FOOTER });
 }
 
 function createVerifySystem(client, commandsDef, opts = {}) {
-  const brand = opts.brand || "🌀 SPIRALS 3X";
   const footerText = process.env.UI_FOOTER || opts.footer || DEFAULT_FOOTER;
   const colorAccent = opts.colorAccent ?? DEFAULT_COLOR;
 
@@ -138,14 +113,7 @@ function createVerifySystem(client, commandsDef, opts = {}) {
       footerText,
       verifyRoleId,
       memberRoleId,
-      linkChannelId,
-      rulesChannelId,
-      serverInfoChannelId,
-      ticketsChannelId,
-      announcementsChannelId,
-      wipeScheduleChannelId,
       gifUrl: panelGifUrl,
-      brand,
     });
 
     const row = new ActionRowBuilder().addComponents(

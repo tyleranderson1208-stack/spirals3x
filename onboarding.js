@@ -13,24 +13,21 @@
 
 const { EmbedBuilder } = require("discord.js");
 
-function buildWelcomeEmbed({ BRAND, FOOTER, COLOR_PRIMARY, COLOR_ACCENT, member, guild, welcomeChannelId, rulesChannelId }) {
-  const welcomeChannelMention = welcomeChannelId ? `<#${welcomeChannelId}>` : "`welcome channel`";
-  const rulesMention = rulesChannelId ? `<#${rulesChannelId}>` : "`rules`";
+function buildWelcomeEmbed({ BRAND, COLOR_PRIMARY, member, guild, verificationChannelId }) {
+  const verificationMention = verificationChannelId ? `<#${verificationChannelId}>` : "`verification`";
+  const memberCount = guild?.memberCount ?? 0;
 
   return new EmbedBuilder()
     .setColor(COLOR_PRIMARY)
-    .setTitle(`🌀 Welcome to ${BRAND}`)
+    .setTitle("🌀 A New Presence Enters the Spiral")
     .setDescription(
-      `Hey ${member} — glad you’re here.\n\n` +
-        `This server is built to feel **premium**: clean spaces, top-tier features, and a community that actually moves.\n\n` +
-        `**Next step:** head to **Verification** and unlock full access.\n` +
-        `After verifying, check ${rulesMention}.\n\n` +
-        `🌀 Enjoy the waves — see you inside.`
+      `${member} has arrived.\n\n` +
+        `You are the **${memberCount}th soul** drawn into ${BRAND}.\n\n` +
+        "The Spiral is watching.\n" +
+        "Access is sealed until verification is complete.\n\n" +
+        `🔒 Proceed to ${verificationMention} to unlock the server.`
     )
-    .addFields(
-      { name: "Getting Started", value: `✅ Verify to unlock the server\n📜 Read ${rulesMention} after verifying\n💡 Drop ideas once you’re in`, inline: false }
-    )
-    .setFooter({ text: FOOTER })
+    .setFooter({ text: "🌀 SPIRALS 3X • Every entry leaves a mark" })
     .setTimestamp();
 }
 
@@ -58,7 +55,7 @@ function createOnboardingSystem(client, opts) {
 
   const WELCOME_CHANNEL_ID = opts?.welcomeChannelId || "";
   const AUDIT_CHANNEL_ID = opts?.auditChannelId || "";
-  const RULES_CHANNEL_ID = opts?.rulesChannelId || "";
+  const VERIFICATION_CHANNEL_ID = opts?.verificationChannelId || process.env.VERIFICATION_CHANNEL_ID || "";
 
   const WELCOME_GIF_URL = (opts?.welcomeGifUrl || "").trim(); // optional
   const DELETE_AFTER_HOURS = parseIntSafe(opts?.welcomeDeleteAfterHours, 24);
@@ -71,22 +68,17 @@ function createOnboardingSystem(client, opts) {
 
     const embed = buildWelcomeEmbed({
       BRAND,
-      FOOTER,
       COLOR_PRIMARY,
-      COLOR_ACCENT,
       member,
       guild: member.guild,
-      welcomeChannelId: WELCOME_CHANNEL_ID,
-      rulesChannelId: RULES_CHANNEL_ID,
+      verificationChannelId: VERIFICATION_CHANNEL_ID,
     });
 
-    // If you set a GIF URL, we show it as the embed image
     if (WELCOME_GIF_URL) embed.setImage(WELCOME_GIF_URL);
 
     const msg = await ch.send({ embeds: [embed] }).catch(() => null);
     if (!msg) return;
 
-    // Auto-delete after X hours
     if (DELETE_AFTER_HOURS > 0) {
       const ms = Math.max(60_000, DELETE_AFTER_HOURS * 60 * 60 * 1000);
       setTimeout(() => {
@@ -106,8 +98,6 @@ function createOnboardingSystem(client, opts) {
   }
 
   function register() {
-    // Fires when a user joins (works if bot has GuildMembers intent in code;
-    // may require enabling "Server Members Intent" in the Developer Portal if your server is large)
     client.on("guildMemberAdd", async (member) => {
       try {
         await sendWelcome(member);
