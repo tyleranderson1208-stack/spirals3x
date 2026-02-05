@@ -21,13 +21,12 @@ function buildWelcomeEmbed({ BRAND, COLOR_PRIMARY, member, guild, verificationCh
     .setColor(COLOR_PRIMARY)
     .setTitle("🌀 A New Presence Enters the Spiral")
     .setDescription(
-      `${member} has arrived.\n\n` +
-        `You are the **${memberCount}th soul** drawn into ${BRAND}.\n\n` +
-        "The Spiral is watching.\n" +
-        "Access is sealed until verification is complete.\n\n" +
-        `🔒 Proceed to ${verificationMention} to unlock the server.`
+      `Welcome, **${member}**.\n\n` +
+        `You are the **${memberCount}ᵗʰ** soul drawn into **${BRAND}**.\n\n` +
+        "The Spiral is **watching**.  \n" +
+        "Your path forward is **sealed** until verification is complete.\n\n" +
+        `🔒 **Proceed to ${verificationMention} to unlock the server.**`
     )
-    .setFooter({ text: "🌀 SPIRALS 3X • Every entry leaves a mark" })
     .setTimestamp();
 }
 
