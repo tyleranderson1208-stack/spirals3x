@@ -11,6 +11,7 @@ const { createSuggestionSystem } = require("./suggestions");
 const { createVerifySystem } = require("./verify");
 const { createOnboardingSystem } = require("./onboarding");
 const { createRulesMenuSystem } = require("./rulesmenu");
+const { createMapVoteSystem } = require("./mapvote");
 
 const {
   Client,
