@@ -1,65 +1,136 @@
 "use strict";
 
 /**
- * Map Vote System (Discord.js v14)
- * - /mapvotepanel (admin) posts panel
- * - One vote per user (changing vote overwrites)
- * - Persistent JSON: data/mapvote.json
- * - Live results edit on same message
+ * 🌀 SPIRALS 3X — Wipe Schedule Panel + Map Vote (Monthly / Manual)
+ *
+ * What you get:
+ * - A "Wipe Schedule Panel" embed that shows:
+ *   • Current Map (image)
+ *   • Last wipe time + relative timer
+ *   • Next wipe time + relative timer
+ *   • Vote status + auto-lock countdown (optional)
+ *   • Extra "server info" lines (customizable)
+ *
+ * - A map vote system:
+ *   • Admin posts vote with 2–5 map images
+ *   • Voting buttons (one vote per user; can change until end/lock)
+ *   • When vote ends: the panel updates with the winning map image immediately
+ *   • Maps are generic (Map 1/Map 2/Map 3...) — no custom names required
+ *
+ * Manual wipe times:
+ * - You set LAST and NEXT wipe timestamps via /wipe-set
+ * - Optional reminders can fire relative to NEXT wipe (24h/1h/10m/wipe)
+ *
+ * Integration (bot.js):
+ *   const { createWipeMapSystem } = require("./mapvote");
+ *   const WIPEMAP = createWipeMapSystem(client);
+ *   commandsDef.push(...WIPEMAP.commands);
+ *   if (await WIPEMAP.handleInteraction(interaction)) return;
+ *   WIPEMAP.onReady();
  */
 
 const fs = require("fs");
 const path = require("path");
-
 const {
   SlashCommandBuilder,
   PermissionFlagsBits,
   EmbedBuilder,
   ActionRowBuilder,
-  StringSelectMenuBuilder,
   ButtonBuilder,
   ButtonStyle,
+  PermissionsBitField,
 } = require("discord.js");
 
-// ========= CONFIG / THEME =========
+// ---------------- THEME ----------------
 const BRAND = "🌀 SPIRALS 3X";
-const COLOR_PRIMARY = 0x00e5ff; // neon cyan
-const COLOR_ACCENT = 0xb100ff; // neon purple
-const COLOR_DARK = 0x050012;
+const COLOR_PRIMARY = 0xb100ff; // premium purple
+const COLOR_ACCENT = 0x00e5ff; // neon cyan
 
-const FOOTER = process.env.UI_FOOTER || "🌀 SPIRALS 3X";
-
-const MAPVOTE_CHANNEL_ID = process.env.MAPVOTE_CHANNEL_ID || "";
-const MAPVOTE_PING_ROLE_ID = process.env.MAPVOTE_PING_ROLE_ID || "";
-const MAPVOTE_TITLE = process.env.MAPVOTE_TITLE || "🗳️ Map Vote — Choose the Next Wipe";
-const MAPVOTE_DESC =
-  process.env.MAPVOTE_DESC ||
-  "Your selection becomes part of the Spiral.\nOne vote per member — you may change your vote at any time.";
-const MAPVOTE_DURATION_HOURS = Math.max(1, parseInt(process.env.MAPVOTE_DURATION_HOURS || "72", 10) || 72);
-
-// Provide maps in .env as comma-separated:
-// MAPVOTE_MAPS=Procedural,Arctic,Desert,Islands,Coastal
-function getMapsFromEnv() {
-  const raw = (process.env.MAPVOTE_MAPS || "").trim();
-  if (!raw) {
-    // sensible defaults if env missing
-    return ["Procedural", "Arctic", "Desert", "Islands", "Coastal"];
-  }
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .slice(0, 25); // Discord select limit
+function nowUnix() {
+  return Math.floor(Date.now() / 1000);
+}
+function clean(s, max = 120) {
+  return String(s || "").trim().slice(0, max);
+}
+function clamp(n, a, b) {
+  return Math.max(a, Math.min(b, n));
+}
+function pct(votes, total) {
+  if (!total) return "0%";
+  return `${Math.round((votes / total) * 100)}%`;
+}
+function bar(votes, total) {
+  const len = 12;
+  if (!total) return "▱".repeat(len);
+  const filled = clamp(Math.round((votes / total) * len), 0, len);
+  return "▰".repeat(filled) + "▱".repeat(len - filled);
+}
+function isAdmin(interaction) {
+  return interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator);
+}
+function envInt(v, def) {
+  const n = parseInt(String(v ?? ""), 10);
+  return Number.isFinite(n) ? n : def;
+}
+function envBool(v, def = false) {
+  if (typeof v === "undefined") return def;
+  return String(v).toLowerCase() === "true";
 }
 
-// ========= DATA STORAGE =========
-const DATA_DIR = path.join(__dirname, "data");
-const FILE = path.join(DATA_DIR, "mapvote.json");
+// "YYYY-MM-DD HH:MM" (UTC)
+function parseUtcToUnix(str) {
+  const m = String(str || "").match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/);
+  if (!m) return null;
+  const [, Y, Mo, D, H, Mi] = m;
+  const dt = new Date(Date.UTC(+Y, +Mo - 1, +D, +H, +Mi, 0));
+  const unix = Math.floor(dt.getTime() / 1000);
+  return Number.isFinite(unix) && unix > 0 ? unix : null;
+}
+
+async function getTextChannel(client, channelId) {
+  if (!channelId) return null;
+  const ch = await client.channels.fetch(channelId).catch(() => null);
+  if (!ch) return null;
+  if (!("send" in ch)) return null;
+  return ch;
+}
+
+// ---------------- STORAGE ----------------
+function defaultData() {
+  return {
+    config: {
+      panelChannelId: null,
+      panelMessageId: null,
+      voteChannelId: null,
+      resultsChannelId: null,
+      pingRoleId: null,
+      remindersEnabled: true,
+      pinResults: true,
+    },
+    wipe: {
+      lastWipeUnix: null,
+      nextWipeUnix: null,
+      currentMapImageUrl: null,
+      // Updated when a vote ends:
+      nextMapImageUrl: null,
+      // Optional extra lines shown on the panel (admin can set):
+      infoLines: [
+        "Monthly wipe • Maps chosen by vote",
+        "Verify → Link Kaos → Read rules",
+      ],
+    },
+    vote: null, // active vote
+    reminders: {
+      nextWipeKey: null,
+      sent: { h24: false, h1: false, m10: false, wipe: false },
+    },
+  };
+}
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
-function loadJsonSafe(file, fallback) {
+function loadJson(file, fallback) {
   if (!fs.existsSync(file)) return fallback;
   try {
     return JSON.parse(fs.readFileSync(file, "utf8"));
@@ -70,316 +141,666 @@ function loadJsonSafe(file, fallback) {
 function saveJson(file, obj) {
   ensureDir(path.dirname(file));
   const tmp = `${file}.tmp`;
-  try {
-    fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), "utf8");
-    fs.renameSync(tmp, file);
-  } catch (e) {
-    try {
-      if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
-    } catch {}
-    console.error("[mapvote] saveJson error:", e?.message || e);
-  }
+  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), "utf8");
+  fs.renameSync(tmp, file);
 }
 
-const db = loadJsonSafe(FILE, {
-  active: null, // { guildId, channelId, messageId, createdAt, closesAt, closed, maps: [], votes: { userId: mapName } }
-});
+// ---------------- FACTORY ----------------
+function createWipeMapSystem(client) {
+  const DATA_DIR = process.env.WIPEMAP_DATA_DIR
+    ? path.resolve(process.env.WIPEMAP_DATA_DIR)
+    : path.join(__dirname, "data");
+  const DATA_FILE = path.join(DATA_DIR, "wipemap.json");
 
-function header(title) {
-  return `**${title}** • ${BRAND}`;
-}
-function rolePingText() {
-  return MAPVOTE_PING_ROLE_ID ? `<@&${MAPVOTE_PING_ROLE_ID}>` : "";
-}
+  const FOOTER =
+    process.env.WIPEMAP_FOOTER ||
+    "Spirals 3X • Monthly wipe • Map vote updates the panel • Premium systems online";
 
-// ========= BUILD UI =========
-function tallyVotes(state) {
-  const counts = {};
-  for (const m of state.maps) counts[m] = 0;
-  for (const uid of Object.keys(state.votes || {})) {
-    const choice = state.votes[uid];
-    if (choice && counts[choice] !== undefined) counts[choice] += 1;
-  }
-  // sort by votes desc then name
-  const rows = Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  return rows;
-}
+  // Auto-lock vote before wipe (seconds)
+  const AUTOLOCK_BEFORE_WIPE_SEC = envInt(process.env.WIPEMAP_AUTOLOCK_BEFORE_WIPE_SEC, 60 * 60); // 1h default
 
-function formatResults(state) {
-  const rows = tallyVotes(state);
-  const total = Object.keys(state.votes || {}).length;
-
-  if (!rows.length) return "`No options loaded.`";
-  if (total === 0) {
-    return rows.map(([name]) => `• **${name}** — \`0\``).join("\n");
-  }
-
-  const max = Math.max(...rows.map(([, c]) => c), 1);
-  const bar = (n) => {
-    const blocks = Math.round((n / max) * 10);
-    return "▰".repeat(blocks) + "▱".repeat(10 - blocks);
+  // Reminder windows (tight)
+  const REMINDERS = {
+    h24: envBool(process.env.WIPEMAP_REMIND_24H, true),
+    h1: envBool(process.env.WIPEMAP_REMIND_1H, true),
+    m10: envBool(process.env.WIPEMAP_REMIND_10M, true),
+    wipe: envBool(process.env.WIPEMAP_REMIND_WIPE, true),
   };
 
-  return rows
-    .map(([name, c]) => `• **${name}** — \`${c}\`  ${bar(c)}`)
-    .join("\n");
-}
+  // Load + patch
+  let data = loadJson(DATA_FILE, defaultData());
+  (function patch() {
+    const base = defaultData();
+    data.config = { ...base.config, ...(data.config || {}) };
+    data.wipe = { ...base.wipe, ...(data.wipe || {}) };
+    if (!Array.isArray(data.wipe.infoLines)) data.wipe.infoLines = base.wipe.infoLines.slice();
+    if (typeof data.vote === "undefined") data.vote = null;
+    data.reminders = { ...base.reminders, ...(data.reminders || {}) };
+    if (!data.reminders.sent) data.reminders.sent = { h24: false, h1: false, m10: false, wipe: false };
+    saveJson(DATA_FILE, data);
+  })();
 
-function buildPanelEmbed(state) {
-  const isClosed = !!state.closed;
-  const closesAt = state.closesAt || (state.createdAt + MAPVOTE_DURATION_HOURS * 3600);
+  // ---------------- PANEL EMBED ----------------
+  function panelEmbed() {
+    const w = data.wipe;
+    const last = w.lastWipeUnix
+      ? `**<t:${w.lastWipeUnix}:F>**\n<t:${w.lastWipeUnix}:R>`
+      : "`Not set`";
+    const next = w.nextWipeUnix
+      ? `**<t:${w.nextWipeUnix}:F>**\n**<t:${w.nextWipeUnix}:R>**`
+      : "`Not set`";
 
-  return new EmbedBuilder()
-    .setColor(isClosed ? COLOR_DARK : COLOR_ACCENT)
-    .setTitle(MAPVOTE_TITLE)
-    .setDescription(
-      `${header("THE SPIRAL DECIDES")}\n\n` +
-        `${MAPVOTE_DESC}\n\n` +
-        `⏳ **Closes:** ${isClosed ? "**Closed**" : `<t:${closesAt}:R>`}\n` +
-        `👥 **Votes cast:** \`${Object.keys(state.votes || {}).length}\`\n\n` +
-        `**Live Results:**\n${formatResults(state)}`
-    )
-    .setFooter({ text: FOOTER });
-}
+    const voteStatus = (() => {
+      if (!data.vote) return "— `No active vote`";
+      const lockAt = w.nextWipeUnix ? w.nextWipeUnix - AUTOLOCK_BEFORE_WIPE_SEC : null;
+      const locked = data.vote.lockedAtUnix ? "🔒 **LOCKED**" : "✅ **OPEN**";
+      const lockLine = lockAt ? `Auto-lock: <t:${lockAt}:R>` : "Auto-lock: `unknown`";
+      return `${locked}\nVote ends: <t:${data.vote.endsAtUnix}:R>\n${lockLine}`;
+    })();
 
-function buildSelectRow(state) {
-  const isClosed = !!state.closed;
-  const menu = new StringSelectMenuBuilder()
-    .setCustomId("mapvote:select")
-    .setPlaceholder(isClosed ? "Voting is closed" : "Choose a map…")
-    .setMinValues(1)
-    .setMaxValues(1)
-    .setDisabled(isClosed);
+    const mapLine = w.currentMapImageUrl ? "✅ **LIVE**" : "⏳ **Awaiting map selection**";
+    const nextMapLine = w.nextMapImageUrl ? "✅ **Locked in**" : (data.vote ? "🗳️ **Voting live**" : "— `Not set`");
 
-  for (const m of state.maps) {
-    menu.addOptions({ label: m, value: m });
+    const info = (w.infoLines || []).slice(0, 6).map(x => `• ${clean(x, 120)}`).join("\n") || "• —";
+
+    const e = new EmbedBuilder()
+      .setColor(COLOR_PRIMARY)
+      .setTitle(`${BRAND} — WIPE SCHEDULE`)
+      .setDescription(
+        [
+          "```ansi\n\u001b[2;35mSYSTEM:\u001b[0m \u001b[2;36mONLINE\u001b[0m   \u001b[2;35m|\u001b[0m   \u001b[2;35mCYCLE:\u001b[0m \u001b[2;36mMONTHLY\u001b[0m   \u001b[2;35m|\u001b[0m   \u001b[2;35mMAP:\u001b[0m \u001b[2;36mVOTED\u001b[0m\n```",
+          "The Spiral rotates on schedule.\nYour vote shapes what comes next.",
+        ].join("\n")
+      )
+      .addFields(
+        { name: "🗺️ CURRENT MAP (LIVE)", value: mapLine, inline: true },
+        { name: "🧿 NEXT MAP (LOCKED)", value: nextMapLine, inline: true },
+        { name: "🧊 LAST WIPE (UTC)", value: last, inline: true },
+        { name: "🔥 NEXT WIPE (UTC)", value: next, inline: true },
+        { name: "🗳️ MAP VOTE", value: voteStatus, inline: true },
+        { name: "📌 SERVER NOTES", value: info, inline: false },
+      )
+      .setFooter({ text: FOOTER })
+      .setTimestamp();
+
+    // Big image = current map (if set)
+    if (w.currentMapImageUrl) e.setImage(w.currentMapImageUrl);
+
+    // Thumbnail = next map preview (if locked)
+    if (w.nextMapImageUrl) e.setThumbnail(w.nextMapImageUrl);
+
+    return e;
   }
 
-  return new ActionRowBuilder().addComponents(menu);
-}
+  async function refreshPanel() {
+    const { panelChannelId, panelMessageId } = data.config;
+    if (!panelChannelId || !panelMessageId) return;
 
-function buildButtonsRow(state) {
-  const isClosed = !!state.closed;
+    const ch = await getTextChannel(client, panelChannelId);
+    if (!ch || !("messages" in ch)) return;
 
-  const refresh = new ButtonBuilder()
-    .setCustomId("mapvote:refresh")
-    .setLabel("Refresh")
-    .setStyle(ButtonStyle.Secondary)
-    .setDisabled(false);
+    const msg = await ch.messages.fetch(panelMessageId).catch(() => null);
+    if (!msg) return;
 
-  const close = new ButtonBuilder()
-    .setCustomId("mapvote:close")
-    .setLabel(isClosed ? "Closed" : "Close Vote")
-    .setStyle(ButtonStyle.Danger)
-    .setDisabled(isClosed);
-
-  return new ActionRowBuilder().addComponents(refresh, close);
-}
-
-// ========= CORE =========
-async function safeFetchChannel(client, channelId) {
-  if (!channelId) return null;
-  return client.channels.fetch(channelId).catch(() => null);
-}
-
-async function safeFetchMessage(channel, messageId) {
-  if (!channel || !messageId || !("messages" in channel)) return null;
-  return channel.messages.fetch(messageId).catch(() => null);
-}
-
-async function upsertPanelMessage(client) {
-  const state = db.active;
-  if (!state) return;
-
-  const channel = await safeFetchChannel(client, state.channelId);
-  if (!channel) return;
-
-  const msg = await safeFetchMessage(channel, state.messageId);
-  if (!msg) return;
-
-  await msg
-    .edit({
-      embeds: [buildPanelEmbed(state)],
-      components: [buildSelectRow(state), buildButtonsRow(state)],
-    })
-    .catch(() => {});
-}
-
-function ensureActive(guildId) {
-  const maps = getMapsFromEnv();
-  if (!db.active || db.active.guildId !== guildId) {
-    db.active = {
-      guildId,
-      channelId: MAPVOTE_CHANNEL_ID || null,
-      messageId: null,
-      createdAt: Math.floor(Date.now() / 1000),
-      closesAt: Math.floor(Date.now() / 1000) + MAPVOTE_DURATION_HOURS * 3600,
-      closed: false,
-      maps,
-      votes: {},
-    };
-    saveJson(FILE, db);
-  } else {
-    // keep maps synced (without wiping votes unless map removed)
-    db.active.maps = maps;
-    saveJson(FILE, db);
-  }
-  return db.active;
-}
-
-async function postPanel(interactionOrChannel, client) {
-  const guild = interactionOrChannel.guild;
-  const guildId = guild.id;
-
-  const state = ensureActive(guildId);
-
-  const channelId =
-    interactionOrChannel.channelId ||
-    interactionOrChannel.id ||
-    MAPVOTE_CHANNEL_ID ||
-    null;
-
-  state.channelId = channelId;
-
-  const channel = await safeFetchChannel(client, channelId);
-  if (!channel || !("send" in channel)) {
-    throw new Error("MAPVOTE_CHANNEL_ID invalid or not a text channel.");
+    await msg.edit({ embeds: [panelEmbed()] }).catch(() => {});
   }
 
-  const ping = rolePingText();
-  if (ping) {
-    await channel.send({ content: ping }).catch(() => {});
+  function pingText() {
+    if (!data.config.pingRoleId) return "";
+    return `<@&${data.config.pingRoleId}> `;
   }
 
-  const sent = await channel.send({
-    embeds: [buildPanelEmbed(state)],
-    components: [buildSelectRow(state), buildButtonsRow(state)],
-  });
+  async function postAndMaybePin(channel, payload) {
+    const msg = await channel.send(payload).catch(() => null);
+    if (!msg) return null;
+    if (data.config.pinResults) await msg.pin().catch(() => {});
+    return msg;
+  }
 
-  state.messageId = sent.id;
-  saveJson(FILE, db);
+  // ---------------- VOTE EMBEDS ----------------
+  function tallyCounts(v) {
+    const counts = new Array(v.options.length).fill(0);
+    for (const uid of Object.keys(v.ballots)) {
+      const idx = v.ballots[uid];
+      if (Number.isInteger(idx) && idx >= 0 && idx < counts.length) counts[idx]++;
+    }
+    return counts;
+  }
 
-  return sent;
-}
+  function voteEmbed(v) {
+    const counts = tallyCounts(v);
+    const total = Object.keys(v.ballots).length;
 
-function isAdminish(interaction) {
-  return interaction.memberPermissions?.has(PermissionFlagsBits.Administrator);
-}
+    const lines = v.options.map((o, i) => {
+      const votes = counts[i];
+      return [
+        `**Map ${i + 1}**`,
+        `\`${bar(votes, total)}\`  **${pct(votes, total)}**  •  \`${votes}\` votes`,
+      ].join("\n");
+    });
 
-async function handleInteraction(interaction, client) {
-  try {
-    // only care about mapvote interactions
-    const id = interaction.customId || "";
-    const isSelect = interaction.isStringSelectMenu?.() && id === "mapvote:select";
-    const isBtn = interaction.isButton?.() && id.startsWith("mapvote:");
-    if (!isSelect && !isBtn) return false;
+    const lockAt = data.wipe.nextWipeUnix ? (data.wipe.nextWipeUnix - AUTOLOCK_BEFORE_WIPE_SEC) : null;
+    const lockLine = lockAt ? `**Auto-lock:** <t:${lockAt}:F> (**<t:${lockAt}:R>**)` : "**Auto-lock:** `Set NEXT wipe to enable`";
 
-    const guildId = interaction.guildId;
-    if (!guildId) return true;
+    const nextWipeLine = data.wipe.nextWipeUnix
+      ? `**Next wipe:** <t:${data.wipe.nextWipeUnix}:F> (**<t:${data.wipe.nextWipeUnix}:R>**)`
+      : "**Next wipe:** `Not set yet`";
 
-    const state = ensureActive(guildId);
+    const status = v.lockedAtUnix ? "🔒 **LOCKED FOR WIPE**" : "✅ **OPEN**";
 
-    // auto-close check
-    const now = Math.floor(Date.now() / 1000);
-    if (!state.closed && state.closesAt && now >= state.closesAt) {
-      state.closed = true;
-      saveJson(FILE, db);
+    return new EmbedBuilder()
+      .setColor(COLOR_ACCENT)
+      .setTitle(`🗳️ ${BRAND} — MAP VOTE`)
+      .setDescription(
+        [
+          "```ansi\n\u001b[2;36mVOTE:\u001b[0m \u001b[2;36mLIVE\u001b[0m   \u001b[2;35m|\u001b[0m   \u001b[2;36mWINNER:\u001b[0m \u001b[2;36mUPDATES PANEL\u001b[0m\n```",
+          status,
+          "",
+          ...lines,
+          "",
+          `**Voters:** \`${total}\``,
+          `**Vote ends:** <t:${v.endsAtUnix}:F> (**<t:${v.endsAtUnix}:R>**)`,
+          lockLine,
+          nextWipeLine,
+          "",
+          "⬇️ Tap a button to vote (you can change until it ends or locks).",
+          "🖼️ Images are in the **Map Previews** thread under this message.",
+        ].join("\n")
+      )
+      .setFooter({ text: FOOTER });
+  }
+
+  function voteButtons(v, disabled = false) {
+    const row = new ActionRowBuilder();
+    for (let i = 0; i < v.options.length; i++) {
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`wmv_${i}`)
+          .setLabel(`${i + 1}`)
+          .setEmoji("🗳️")
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(disabled)
+      );
+    }
+    return [row];
+  }
+
+  async function postPreviewsThread(voteMsg, options) {
+    const thread = await voteMsg.startThread({
+      name: "🗺️ Map Previews",
+      autoArchiveDuration: 1440,
+      reason: "Spirals 3X map previews",
+    }).catch(() => null);
+
+    if (!thread) return null;
+
+    const intro = new EmbedBuilder()
+      .setColor(COLOR_PRIMARY)
+      .setTitle("🌀 MAP PREVIEWS")
+      .setDescription("View the maps below, then vote in the main message.\nUse full-screen for clarity.")
+      .setFooter({ text: FOOTER });
+
+    await thread.send({ embeds: [intro] }).catch(() => {});
+
+    for (let i = 0; i < options.length; i++) {
+      const o = options[i];
+      const e = new EmbedBuilder()
+        .setColor(COLOR_ACCENT)
+        .setTitle(`Map ${i + 1}`)
+        .setImage(o.imageUrl)
+        .setFooter({ text: "Vote in the main message above" });
+
+      await thread.send({ embeds: [e] }).catch(() => {});
     }
 
-    // SELECT: vote
-    if (isSelect) {
-      if (state.closed) {
-        await interaction.reply({ content: "🌀 Voting is closed.", ephemeral: true }).catch(() => {});
-        return true;
+    return thread.id;
+  }
+
+  function pickWinner(v) {
+    const counts = tallyCounts(v);
+    const total = Object.keys(v.ballots).length;
+
+    let bestIdx = 0;
+    let bestVotes = -1;
+    for (let i = 0; i < counts.length; i++) {
+      if (counts[i] > bestVotes) {
+        bestVotes = counts[i];
+        bestIdx = i;
       }
+    }
+    return { bestIdx, bestVotes, counts, total };
+  }
 
-      const choice = interaction.values?.[0];
-      if (!choice || !state.maps.includes(choice)) {
-        await interaction.reply({ content: "❌ Invalid choice.", ephemeral: true }).catch(() => {});
-        return true;
+  function resultsEmbed(v, winnerImageUrl, winnerVotes, totalVotes, reason) {
+    return new EmbedBuilder()
+      .setColor(COLOR_PRIMARY)
+      .setTitle(`🏆 ${BRAND} — MAP LOCKED`)
+      .setDescription(
+        [
+          "```ansi\n\u001b[2;35mRESULT:\u001b[0m \u001b[2;36mLOCKED\u001b[0m   \u001b[2;35m|\u001b[0m   \u001b[2;35mEFFECT:\u001b[0m \u001b[2;36mPANEL UPDATED\u001b[0m\n```",
+          `**Winner:** \`Map ${v.winnerIndex + 1}\``,
+          `**Votes:** \`${winnerVotes}\` / \`${totalVotes}\` (${pct(winnerVotes, totalVotes)})`,
+          "",
+          reason ? `**Ended:** ${reason}` : "",
+          "",
+          "✅ The Wipe Schedule panel has been updated with the locked map.",
+        ].filter(Boolean).join("\n")
+      )
+      .setImage(winnerImageUrl)
+      .setFooter({ text: FOOTER })
+      .setTimestamp();
+  }
+
+  async function endVote(reason) {
+    if (!data.vote) return;
+    const v = data.vote;
+
+    const { bestIdx, bestVotes, counts, total } = pickWinner(v);
+    const winnerOpt = v.options[bestIdx];
+
+    // Update panel immediately: NEXT MAP thumbnail + also set "current map" if you want it live now
+    // Your request: when voting ends, map updated on panel. We'll lock it in as "next map".
+    data.wipe.nextMapImageUrl = winnerOpt.imageUrl;
+
+    // Edit the vote message -> results
+    const voteCh = await getTextChannel(client, v.channelId);
+    if (voteCh && "messages" in voteCh) {
+      const msg = await voteCh.messages.fetch(v.messageId).catch(() => null);
+      if (msg) {
+        const embed = resultsEmbed({ ...v, winnerIndex: bestIdx }, winnerOpt.imageUrl, bestVotes, total, reason);
+        await msg.edit({ embeds: [embed], components: [] }).catch(() => {});
       }
+    }
 
-      state.votes[interaction.user.id] = choice;
-      saveJson(FILE, db);
+    // Post results to results channel
+    const resultsChId = data.config.resultsChannelId || data.config.panelChannelId || v.channelId;
+    const resultsCh = await getTextChannel(client, resultsChId);
+    if (resultsCh) {
+      const embed = resultsEmbed({ ...v, winnerIndex: bestIdx }, winnerOpt.imageUrl, bestVotes, total, reason);
+      await postAndMaybePin(resultsCh, {
+        content: `${pingText()}🏁 **Map vote concluded — panel updated.**`,
+        embeds: [embed],
+      });
+    }
 
-      await interaction.reply({
-        content: `✅ Your vote is sealed: **${choice}**`,
-        ephemeral: true,
+    data.vote = null;
+    saveJson(DATA_FILE, data);
+
+    await refreshPanel();
+  }
+
+  async function autoLockVoteIfDue() {
+    if (!data.vote) return;
+    if (!data.wipe.nextWipeUnix) return; // need next wipe to lock-before-wipe
+
+    const now = nowUnix();
+    const lockAt = data.wipe.nextWipeUnix - AUTOLOCK_BEFORE_WIPE_SEC;
+
+    if (data.vote.lockedAtUnix) return;
+    if (now >= lockAt) {
+      data.vote.lockedAtUnix = now;
+      saveJson(DATA_FILE, data);
+      await endVote("Auto-locked before wipe");
+    }
+  }
+
+  // ---------------- REMINDERS ----------------
+  function bumpReminderKey() {
+    const key = data.wipe.nextWipeUnix ? String(data.wipe.nextWipeUnix) : null;
+    if (data.reminders.nextWipeKey !== key) {
+      data.reminders.nextWipeKey = key;
+      data.reminders.sent = { h24: false, h1: false, m10: false, wipe: false };
+    }
+  }
+
+  async function sendRemindersIfDue() {
+    if (!data.config.remindersEnabled) return;
+    if (!data.wipe.nextWipeUnix) return;
+
+    bumpReminderKey();
+
+    const now = nowUnix();
+    const next = data.wipe.nextWipeUnix;
+    const diff = next - now;
+
+    const outChannelId = data.config.resultsChannelId || data.config.panelChannelId;
+    const ch = await getTextChannel(client, outChannelId);
+    if (!ch) return;
+
+    const make = (title, desc) =>
+      new EmbedBuilder().setColor(COLOR_ACCENT).setTitle(title).setDescription(desc).setFooter({ text: FOOTER }).setTimestamp();
+
+    if (REMINDERS.h24 && !data.reminders.sent.h24 && diff <= 24 * 3600 && diff > 23 * 3600) {
+      data.reminders.sent.h24 = true;
+      saveJson(DATA_FILE, data);
+      await ch.send({
+        content: `${pingText()}🧊 **Wipe reminder — 24 hours**`,
+        embeds: [make(`${BRAND} — WIPE IN 24H`, `**Next wipe:** <t:${next}:F> (**<t:${next}:R>**)\n🗳️ If a map vote is live, lock it in.`)],
       }).catch(() => {});
-
-      await upsertPanelMessage(client);
-      return true;
     }
 
-    // BUTTONS
-    if (isBtn) {
-      const action = id.split(":")[1];
+    if (REMINDERS.h1 && !data.reminders.sent.h1 && diff <= 3600 && diff > 50 * 60) {
+      data.reminders.sent.h1 = true;
+      saveJson(DATA_FILE, data);
+      await ch.send({
+        content: `${pingText()}🔥 **Wipe reminder — 1 hour**`,
+        embeds: [make(`${BRAND} — WIPE IN 1H`, `**Next wipe:** <t:${next}:F> (**<t:${next}:R>**)\n🔒 Votes may auto-lock around now.`)],
+      }).catch(() => {});
+    }
 
-      if (action === "refresh") {
-        await interaction.deferUpdate().catch(() => {});
-        await upsertPanelMessage(client);
-        return true;
-      }
+    if (REMINDERS.m10 && !data.reminders.sent.m10 && diff <= 10 * 60 && diff > 8 * 60) {
+      data.reminders.sent.m10 = true;
+      saveJson(DATA_FILE, data);
+      await ch.send({
+        content: `${pingText()}⚡ **Wipe reminder — 10 minutes**`,
+        embeds: [make(`${BRAND} — WIPE IN 10M`, `**Next wipe:** <t:${next}:F> (**<t:${next}:R>**)`)],
+      }).catch(() => {});
+    }
 
-      if (action === "close") {
-        if (!isAdminish(interaction)) {
-          await interaction.reply({ content: "❌ Admin only.", ephemeral: true }).catch(() => {});
-          return true;
+    if (REMINDERS.wipe && !data.reminders.sent.wipe && diff <= 0) {
+      data.reminders.sent.wipe = true;
+      saveJson(DATA_FILE, data);
+      await ch.send({
+        content: `${pingText()}💥 **WIPE IS LIVE NOW**`,
+        embeds: [make(`${BRAND} — WIPE NOW`, `**Wipe time:** <t:${next}:F>\n🌀 The Spiral resets.`)],
+      }).catch(() => {});
+    }
+  }
+
+  // ---------------- COMMANDS ----------------
+  const commands = [
+    new SlashCommandBuilder()
+      .setName("wipe-panel")
+      .setDescription("Create the Wipe Schedule panel (admin only)")
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addChannelOption(o => o.setName("channel").setDescription("Channel to post the panel").setRequired(true)),
+
+    new SlashCommandBuilder()
+      .setName("wipe-setup")
+      .setDescription("Set channels + settings for wipe/mapvote (admin only)")
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addChannelOption(o => o.setName("vote_channel").setDescription("Where map votes are posted").setRequired(true))
+      .addChannelOption(o => o.setName("results_channel").setDescription("Where results/reminders post (optional)").setRequired(false))
+      .addRoleOption(o => o.setName("ping_role").setDescription("Role ping for reminders/results (optional)").setRequired(false))
+      .addBooleanOption(o => o.setName("reminders").setDescription("Enable wipe reminders (default true)").setRequired(false))
+      .addBooleanOption(o => o.setName("pin_results").setDescription("Auto-pin results (default true)").setRequired(false)),
+
+    new SlashCommandBuilder()
+      .setName("wipe-set")
+      .setDescription("Manually set last/next wipe timestamps (UTC) (admin only)")
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addStringOption(o => o.setName("last_utc").setDescription('Last wipe: "YYYY-MM-DD HH:MM" (UTC)').setRequired(true))
+      .addStringOption(o => o.setName("next_utc").setDescription('Next wipe: "YYYY-MM-DD HH:MM" (UTC)').setRequired(true)),
+
+    new SlashCommandBuilder()
+      .setName("wipe-map")
+      .setDescription("Set the current LIVE map image (admin only)")
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addAttachmentOption(o => o.setName("image").setDescription("Current map image").setRequired(true)),
+
+    new SlashCommandBuilder()
+      .setName("wipe-notes")
+      .setDescription("Set panel notes (1-6 lines) (admin only)")
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addStringOption(o => o.setName("lines").setDescription("Separate lines using | (max 6)").setRequired(true)),
+
+    new SlashCommandBuilder()
+      .setName("mapvote-start")
+      .setDescription("Start a map vote (images). Maps are generic. (admin only)")
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addIntegerOption(o => o.setName("duration_minutes").setDescription("Vote duration").setRequired(true).setMinValue(1).setMaxValue(720))
+      .addAttachmentOption(o => o.setName("map1_image").setDescription("Map 1 image").setRequired(true))
+      .addAttachmentOption(o => o.setName("map2_image").setDescription("Map 2 image").setRequired(true))
+      .addAttachmentOption(o => o.setName("map3_image").setDescription("Map 3 image (optional)").setRequired(false))
+      .addAttachmentOption(o => o.setName("map4_image").setDescription("Map 4 image (optional)").setRequired(false))
+      .addAttachmentOption(o => o.setName("map5_image").setDescription("Map 5 image (optional)").setRequired(false))
+      .addBooleanOption(o => o.setName("ping").setDescription("Ping configured role when vote starts").setRequired(false)),
+
+    new SlashCommandBuilder()
+      .setName("mapvote-end")
+      .setDescription("Force end the current vote (admin only)")
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+  ];
+
+  // ---------------- INTERACTIONS ----------------
+  async function handleInteraction(interaction) {
+    try {
+      // Buttons (vote)
+      if (interaction.isButton() && interaction.customId.startsWith("wmv_")) {
+        if (!data.vote) return interaction.reply({ content: "Voting isn’t active.", ephemeral: true });
+
+        const v = data.vote;
+        if (interaction.message.id !== v.messageId) {
+          return interaction.reply({ content: "This vote is no longer active.", ephemeral: true });
         }
 
-        state.closed = true;
-        saveJson(FILE, db);
+        const now = nowUnix();
+        if (v.lockedAtUnix) return interaction.reply({ content: "🔒 Vote locked for wipe.", ephemeral: true });
+        if (now >= v.endsAtUnix) return interaction.reply({ content: "⏳ Voting ended.", ephemeral: true });
 
-        await interaction.reply({ content: "🧿 Vote closed. Results are locked.", ephemeral: true }).catch(() => {});
-        await upsertPanelMessage(client);
-        return true;
+        const m = interaction.customId.match(/^wmv_(\d+)$/);
+        if (!m) return interaction.reply({ content: "Invalid vote button.", ephemeral: true });
+        const idx = parseInt(m[1], 10);
+
+        if (!Number.isInteger(idx) || idx < 0 || idx >= v.options.length) {
+          return interaction.reply({ content: "Invalid option.", ephemeral: true });
+        }
+
+        v.ballots[interaction.user.id] = idx;
+        saveJson(DATA_FILE, data);
+
+        await interaction.message.edit({
+          embeds: [voteEmbed(v)],
+          components: voteButtons(v, false),
+        }).catch(() => {});
+
+        return interaction.reply({ content: `✅ Vote cast: **Map ${idx + 1}**`, ephemeral: true });
       }
-    }
 
-    return true;
-  } catch (e) {
-    console.error("[mapvote] handleInteraction error:", e?.message || e);
-    try {
+      // Slash commands
+      if (!interaction.isChatInputCommand()) return false;
+
+      const name = interaction.commandName;
+      const adminOnly = ["wipe-panel", "wipe-setup", "wipe-set", "wipe-map", "wipe-notes", "mapvote-start", "mapvote-end"].includes(name);
+      if (adminOnly && !isAdmin(interaction)) return interaction.reply({ content: "❌ Admin only.", ephemeral: true });
+
+      if (name === "wipe-panel") {
+        const ch = interaction.options.getChannel("channel", true);
+        const msg = await ch.send({ embeds: [panelEmbed()] });
+
+        data.config.panelChannelId = ch.id;
+        data.config.panelMessageId = msg.id;
+        saveJson(DATA_FILE, data);
+
+        return interaction.reply({ content: `✅ Wipe panel created in <#${ch.id}>`, ephemeral: true });
+      }
+
+      if (name === "wipe-setup") {
+        const voteCh = interaction.options.getChannel("vote_channel", true);
+        const resultsCh = interaction.options.getChannel("results_channel", false);
+        const pingRole = interaction.options.getRole("ping_role", false);
+        const reminders = interaction.options.getBoolean("reminders");
+        const pinResults = interaction.options.getBoolean("pin_results");
+
+        data.config.voteChannelId = voteCh.id;
+        if (resultsCh) data.config.resultsChannelId = resultsCh.id;
+        if (pingRole) data.config.pingRoleId = pingRole.id;
+        if (typeof reminders === "boolean") data.config.remindersEnabled = reminders;
+        if (typeof pinResults === "boolean") data.config.pinResults = pinResults;
+
+        saveJson(DATA_FILE, data);
+        await refreshPanel();
+
+        return interaction.reply({
+          content:
+            `✅ Setup saved.\n• Vote: <#${data.config.voteChannelId}>\n• Results: ${data.config.resultsChannelId ? `<#${data.config.resultsChannelId}>` : "`not set (uses panel)`"}\n• Reminders: \`${data.config.remindersEnabled}\`\n• Pin results: \`${data.config.pinResults}\`\n• Ping role: ${data.config.pingRoleId ? `<@&${data.config.pingRoleId}>` : "`none`"}`,
+          ephemeral: true,
+        });
+      }
+
+      if (name === "wipe-set") {
+        const lastStr = interaction.options.getString("last_utc", true);
+        const nextStr = interaction.options.getString("next_utc", true);
+
+        const lastUnix = parseUtcToUnix(lastStr);
+        const nextUnix = parseUtcToUnix(nextStr);
+
+        if (!lastUnix || !nextUnix) {
+          return interaction.reply({ content: '❌ Format must be: `YYYY-MM-DD HH:MM` (UTC)', ephemeral: true });
+        }
+        if (nextUnix <= lastUnix) {
+          return interaction.reply({ content: "❌ Next wipe must be after last wipe.", ephemeral: true });
+        }
+
+        data.wipe.lastWipeUnix = lastUnix;
+        data.wipe.nextWipeUnix = nextUnix;
+
+        // Reset reminder state when next wipe changes
+        data.reminders.nextWipeKey = String(nextUnix);
+        data.reminders.sent = { h24: false, h1: false, m10: false, wipe: false };
+
+        saveJson(DATA_FILE, data);
+        await refreshPanel();
+
+        return interaction.reply({
+          content: `✅ Wipe times saved.\nLast: <t:${lastUnix}:F>\nNext: <t:${nextUnix}:F>`,
+          ephemeral: true,
+        });
+      }
+
+      if (name === "wipe-map") {
+        const img = interaction.options.getAttachment("image", true);
+        data.wipe.currentMapImageUrl = img.url;
+        saveJson(DATA_FILE, data);
+        await refreshPanel();
+        return interaction.reply({ content: "✅ Current map image updated on the panel.", ephemeral: true });
+      }
+
+      if (name === "wipe-notes") {
+        const raw = interaction.options.getString("lines", true);
+        const parts = raw.split("|").map(s => clean(s, 120)).filter(Boolean).slice(0, 6);
+        data.wipe.infoLines = parts.length ? parts : defaultData().wipe.infoLines.slice();
+        saveJson(DATA_FILE, data);
+        await refreshPanel();
+        return interaction.reply({ content: "✅ Panel notes updated.", ephemeral: true });
+      }
+
+      if (name === "mapvote-start") {
+        if (data.vote) return interaction.reply({ content: "❌ A vote is already active.", ephemeral: true });
+        if (!data.config.voteChannelId) return interaction.reply({ content: "❌ Run `/wipe-setup` first.", ephemeral: true });
+        if (!data.config.panelChannelId || !data.config.panelMessageId) return interaction.reply({ content: "❌ Run `/wipe-panel` first.", ephemeral: true });
+
+        const duration = interaction.options.getInteger("duration_minutes", true);
+        const ping = interaction.options.getBoolean("ping") || false;
+
+        const imgs = [];
+        const a1 = interaction.options.getAttachment("map1_image", true);
+        const a2 = interaction.options.getAttachment("map2_image", true);
+        imgs.push(a1.url, a2.url);
+
+        const a3 = interaction.options.getAttachment("map3_image", false);
+        const a4 = interaction.options.getAttachment("map4_image", false);
+        const a5 = interaction.options.getAttachment("map5_image", false);
+        if (a3) imgs.push(a3.url);
+        if (a4) imgs.push(a4.url);
+        if (a5) imgs.push(a5.url);
+
+        const opts = imgs.map((url) => ({ imageUrl: url }));
+
+        const voteCh = await getTextChannel(client, data.config.voteChannelId);
+        if (!voteCh) return interaction.reply({ content: "❌ Vote channel not accessible.", ephemeral: true });
+
+        const endsAtUnix = nowUnix() + duration * 60;
+
+        data.vote = {
+          channelId: voteCh.id,
+          messageId: null,
+          threadId: null,
+          endsAtUnix,
+          options: opts,
+          ballots: {},
+          lockedAtUnix: null,
+        };
+        saveJson(DATA_FILE, data);
+
+        const content = ping ? `${pingText()}🗳️ **MAP VOTE LIVE — choose what the Spiral reveals next.**` : null;
+
+        const msg = await voteCh.send({
+          content,
+          embeds: [voteEmbed(data.vote)],
+          components: voteButtons(data.vote, false),
+        });
+
+        data.vote.messageId = msg.id;
+        saveJson(DATA_FILE, data);
+
+        const threadId = await postPreviewsThread(msg, opts);
+        data.vote.threadId = threadId;
+        saveJson(DATA_FILE, data);
+
+        await refreshPanel();
+
+        return interaction.reply({ content: `✅ Vote started in <#${voteCh.id}> (ends <t:${endsAtUnix}:R>).`, ephemeral: true });
+      }
+
+      if (name === "mapvote-end") {
+        if (!data.vote) return interaction.reply({ content: "❌ No active vote.", ephemeral: true });
+        await endVote("Force-ended by admin");
+        return interaction.reply({ content: "✅ Vote ended. Panel updated.", ephemeral: true });
+      }
+
+      return false;
+    } catch (e) {
+      console.error("wipemap handleInteraction error:", e);
       if (!interaction.replied) {
-        await interaction.reply({ content: "❌ Map vote error (check logs).", ephemeral: true });
+        try {
+          await interaction.reply({ content: "❌ Wipe/Map system error (check logs).", ephemeral: true });
+        } catch {}
       }
-    } catch {}
-    return true;
+      return true;
+    }
   }
-}
 
-// ========= EXPORT / COMMANDS =========
-function createMapVoteSystem(client, commandsDef) {
-  const cmd = new SlashCommandBuilder()
-    .setName("mapvotepanel")
-    .setDescription("Post (or repost) the SPIRALS map vote panel (admin).")
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
+  // ---------------- LOOP ----------------
+  let intervalHandle = null;
 
-  const commands = [cmd];
-
-  // If your bot uses commandsDef aggregation:
-  if (Array.isArray(commandsDef)) commandsDef.push(...commands);
-
-  // optional: background auto-close refresh loop
-  setInterval(async () => {
+  async function tick() {
     try {
-      const state = db.active;
-      if (!state || state.closed) return;
+      // Auto-lock vote before wipe (only works if NEXT wipe set)
+      await autoLockVoteIfDue();
 
-      const now = Math.floor(Date.now() / 1000);
-      if (state.closesAt && now >= state.closesAt) {
-        state.closed = true;
-        saveJson(FILE, db);
-        await upsertPanelMessage(client);
+      // Vote expiry
+      if (data.vote && nowUnix() >= data.vote.endsAtUnix && !data.vote.lockedAtUnix) {
+        await endVote("Time expired");
       }
-    } catch {}
-  }, 30_000);
+
+      // Reminders
+      await sendRemindersIfDue();
+
+      // Keep panel fresh (timers)
+      await refreshPanel();
+    } catch (e) {
+      console.error("wipemap tick error:", e);
+    }
+  }
+
+  function onReady() {
+    // Ensure reminder key is synced
+    if (data.wipe.nextWipeUnix) {
+      data.reminders.nextWipeKey = String(data.wipe.nextWipeUnix);
+    }
+    saveJson(DATA_FILE, data);
+
+    if (!intervalHandle) intervalHandle = setInterval(tick, 60 * 1000);
+    tick().catch(() => {});
+  }
 
   return {
+    name: "wipemap",
     commands,
-    handleInteraction: (interaction) => handleInteraction(interaction, client),
-    postPanel: async (channelOrInteraction) => postPanel(channelOrInteraction, client),
+    handleInteraction,
+    onReady,
   };
 }
 
-module.exports = { createMapVoteSystem };
+module.exports = { createWipeMapSystem };

@@ -12,6 +12,7 @@ const { createVerifySystem } = require("./verify");
 const { createOnboardingSystem } = require("./onboarding");
 const { createRulesMenuSystem } = require("./rulesmenu");
 const { createMapVoteSystem } = require("./mapvote");
+const { createWipeMapSystem } = require("./mapvote");
 
 const {
   Client,
@@ -822,110 +823,107 @@ const partyByGuild = new Map();
 function makeParty(hostId, channelId, tierKey) {
   return {
     hostId,
-    channelId,
-    tierKey,
-    createdAt: Date.now(),
+    createdAt: nowSec(),
     state: "LOBBY",
-    players: new Map(), // userId -> { colourKey }
-    autoStartTimeout: null,
+    finalized: false,
+    players: new Map(), // uid -> { colourKey }
     messageId: null,
+    channelId,
+    tierKey: tierKey || "standard",
+    autoStartTimeout: null,
+    seed: newSeed(),
   };
 }
 
 function colourTaken(party, colourKey) {
-  for (const p of party.players.values()) {
-    if (p.colourKey === colourKey) return true;
-  }
+  for (const p of party.players.values()) if (p.colourKey === colourKey) return true;
   return false;
 }
 
-function listPartyPlayers(party) {
-  const lines = [];
-  for (const [uid, p] of party.players.entries()) {
-    const c = COLOUR_BY_KEY.get(p.colourKey);
-    lines.push(`• ${tag(uid)} — ${c.label}`);
-  }
-  return lines.length ? lines.join("\n") : "_None yet._";
-}
+async function getPartyMessage(guild, party) {
+  if (!party.channelId || !party.messageId) return { channel: null, message: null };
 
-function buildPartyEmbed(party, tier) {
-  return new EmbedBuilder()
-    .setColor(COLOR_PRIMARY)
-    .setTitle(`🏟️ ${BRAND} — PARTY LOBBY`)
-    .setDescription(
-      `${header("OPEN LOBBY")}\n\n` +
-        `🎯 **Tier:** ${tier.emoji} ${tier.label}\n` +
-        `🎟️ **Entry:** ${tier.tokenCost} token(s)\n` +
-        `👤 **Host:** ${tag(party.hostId)}\n` +
-        `⏳ **Auto-start:** <t:${Math.floor((party.createdAt + 60_000) / 1000)}:R>\n\n` +
-        `**Players (${party.players.size}/5):**\n${listPartyPlayers(party)}`
-    )
-    .setFooter({ text: FOOTER });
+  const channel = await guild.channels.fetch(party.channelId).catch(() => null);
+  if (!channel || !("messages" in channel)) return { channel: null, message: null };
+
+  const message = await channel.messages.fetch(party.messageId).catch(() => null);
+  return { channel, message };
 }
 
 async function editOrPostPartyEmbed(interaction, party) {
   const tier = TIERS[party.tierKey] || TIERS.standard;
-  const ch = await interaction.guild.channels.fetch(party.channelId).catch(() => null);
-  if (!ch || !("send" in ch)) return;
 
-  if (party.messageId) {
-    const msg = await ch.messages.fetch(party.messageId).catch(() => null);
-    if (msg) {
-      await msg.edit({ embeds: [buildPartyEmbed(party, tier)] }).catch(() => {});
-      return;
-    }
+  // lineup emoji-only + host crown + slots left
+  const lineup = Array.from(party.players.entries()).map(([uid, p]) => {
+    const c = COLOUR_BY_KEY.get(p.colourKey);
+    const crown = uid === party.hostId ? " 👑" : "";
+    return `${c.label} ${tag(uid)}${crown}`;
+  });
+
+  const timeLeft = Math.max(0, party.createdAt + 60 - nowSec());
+  const autoLine = party.state === "LOBBY" ? `⏱️ **Auto-start:** <t:${nowSec() + timeLeft}:R>` : "";
+  const slotsLeft = Math.max(0, 5 - party.players.size);
+
+  const desc =
+    `${header("PARTY LOBBY — UNIQUE COLOURS")}\n\n` +
+    `👑 **Host:** ${tag(party.hostId)}\n` +
+    `${tier.emoji} **Tier:** ${tier.label} • Entry: **${tier.tokenCost} token(s)**\n` +
+    `👥 **Players:** \`${party.players.size}\` / 5 • **Slots left:** \`${slotsLeft}\`\n` +
+    `${autoLine}\n\n` +
+    `**Line-up:**\n${lineup.length ? lineup.join("\n") : "`No racers yet.`"}\n\n` +
+    `✅ **Join:** \`/raceparty join colour:<colour>\`\n` +
+    `🚪 **Leave:** \`/raceparty leave\`\n` +
+    `🏁 **Start now:** \`/raceparty start\` (host)\n` +
+    `🧹 **Cancel:** \`/raceparty cancel\` (host)`;
+
+  const e = new EmbedBuilder()
+    .setColor(COLOR_ACCENT)
+    .setTitle(`🏟️ ${BRAND} — PARTY RHIB RACE`)
+    .setDescription(desc)
+    .setFooter({ text: FOOTER });
+
+  if (!party.messageId) {
+    const msg = await interaction.reply({ embeds: [e], fetchReply: true });
+    party.messageId = msg.id;
+    party.channelId = interaction.channelId;
+    return;
   }
 
-  const msg = await ch.send({ embeds: [buildPartyEmbed(party, tier)] }).catch(() => null);
-  if (msg) party.messageId = msg.id;
+  const { message } = await getPartyMessage(interaction.guild, party);
+  if (message) await message.edit({ embeds: [e] }).catch(() => {});
 }
 
 async function cancelParty(guild, party, reason) {
+  const { message } = await getPartyMessage(guild, party);
+  const e = new EmbedBuilder()
+    .setColor(COLOR_DARK)
+    .setTitle(`🧹 ${BRAND} — PARTY CLOSED`)
+    .setDescription(`${header("LOBBY ENDED")}\n\n${reason}`)
+    .setFooter({ text: FOOTER });
+
+  if (message) await message.edit({ embeds: [e] }).catch(() => {});
   if (party.autoStartTimeout) clearTimeout(party.autoStartTimeout);
   partyByGuild.delete(guild.id);
-
-  const ch = await guild.channels.fetch(party.channelId).catch(() => null);
-  if (!ch || !("send" in ch)) return;
-  await ch.send({ content: `❌ ${reason}` }).catch(() => {});
 }
 
 async function runPartyRace(guild, party) {
-  if (party.state !== "LOBBY") return;
-  party.state = "RUNNING";
+  if (settings.freezeRaces) return;
+  seasonCheckAndResetIfNeeded();
 
-  if (party.autoStartTimeout) clearTimeout(party.autoStartTimeout);
-
-  const channel = await guild.channels.fetch(party.channelId).catch(() => null);
-  if (!channel || !("send" in channel)) return;
+  if (party.state !== "LOBBY" || party.finalized) return;
 
   const tier = TIERS[party.tierKey] || TIERS.standard;
 
   if (party.players.size < 2) {
-    await cancelParty(guild, party, "Not enough players (min 2).");
+    await cancelParty(guild, party, "Not enough racers joined in time. (Need **2+** to start)");
     return;
   }
 
-  // Deduct tokens + set cooldown
-  for (const uid of party.players.keys()) {
-    const u = getTok(uid);
-    if (u.tokens < tier.tokenCost) {
-      await channel.send({ content: `❌ ${tag(uid)} lacks tokens. Party cancelled.` }).catch(() => {});
-      await cancelParty(guild, party, "Insufficient tokens.");
-      return;
-    }
-  }
-
-  for (const uid of party.players.keys()) {
-    const u = getTok(uid);
-    u.tokens -= tier.tokenCost;
-    setCooldown(lastPartyPlay, uid);
-  }
-  saveTokens();
-
-  // seed
-  const seed = newSeed();
+  // seeded RNG for party race
+  const seed = party.seed || newSeed();
   const rng = makeRng(seed);
 
+  // Audit: log seed (party)
   await auditLog(
     guild,
     new EmbedBuilder()
@@ -939,9 +937,67 @@ async function runPartyRace(guild, party) {
       .setFooter({ text: FOOTER })
   );
 
-  const racers = Array.from(party.players.entries()).map(([uid, p]) => ({
-    userId: uid,
-    ...COLOUR_BY_KEY.get(p.colourKey),
+  // re-check everyone at start (still important)
+  for (const uid of party.players.keys()) {
+    const left = onCooldown(lastPartyPlay, uid, PARTY_COOLDOWN_SEC);
+    if (left) {
+      await cancelParty(guild, party, "Someone was on cooldown. Try again later.");
+      return;
+    }
+    if (getTok(uid).tokens < tier.tokenCost) {
+      await cancelParty(guild, party, `Someone did not have enough tokens for **${tier.label}** tier.`);
+      return;
+    }
+  }
+
+  for (const uid of party.players.keys()) {
+    getTok(uid).tokens -= tier.tokenCost;
+    setCooldown(lastPartyPlay, uid);
+    getStats(uid).races += 1;
+  }
+  saveTokens();
+  saveStats();
+
+  party.state = "RUNNING";
+  if (party.autoStartTimeout) clearTimeout(party.autoStartTimeout);
+
+  let { channel: lobbyChannel, message: lobbyMsg } = await getPartyMessage(guild, party);
+
+  if (!lobbyChannel) {
+    lobbyChannel = await guild.channels.fetch(party.channelId).catch(() => null);
+  }
+  if (lobbyChannel && !lobbyMsg) {
+    const created = await lobbyChannel
+      .send({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(COLOR_PRIMARY)
+            .setTitle(`🏁 ${BRAND} — PARTY LIVE TRACK FEED`)
+            .setDescription(`${header("MULTIPLAYER LIVE")}\n\n(Starting...)`)
+            .setFooter({ text: FOOTER }),
+        ],
+      })
+      .catch(() => null);
+
+    if (created) {
+      party.messageId = created.id;
+      lobbyMsg = created;
+    }
+  }
+
+  if (lobbyMsg) {
+    const cin = new EmbedBuilder()
+      .setColor(COLOR_NEUTRAL)
+      .setTitle(`🎬 ${BRAND} — Race Cinematic`)
+      .setDescription(`${CINEMATIC.join("\n")}\n\n🏁 **LAUNCH!**`)
+      .setFooter({ text: FOOTER });
+
+    await lobbyMsg.edit({ embeds: [cin] }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 900));
+  }
+
+  const racers = COLOURS.map((c) => ({
+    ...c,
     pos: 0,
     finished: false,
     finishTick: null,
@@ -950,35 +1006,19 @@ async function runPartyRace(guild, party) {
 
   let finishedCount = 0;
   let tick = 0;
-  let raceFinalized = false;
-
-  const msg = await channel.send({
-    embeds: [
-      new EmbedBuilder()
-        .setColor(COLOR_PRIMARY)
-        .setTitle(`🏁 ${BRAND} — PARTY RHIB RACE`)
-        .setDescription(
-          `${header("PARTY RACE")}\n\n` +
-            `🎯 **Tier:** ${tier.emoji} ${tier.label}\n` +
-            `🎟️ **Entry:** ${tier.tokenCost} token(s)\n\n` +
-            `**Players:**\n${racers.map((r) => `• ${tag(r.userId)} — ${r.label}`).join("\n")}`
-        )
-        .setFooter({ text: FOOTER }),
-    ],
-  });
-
   let lastFrameKey = "";
 
   const interval = setInterval(async () => {
     try {
-      if (raceFinalized) return;
+      if (party.finalized) return;
+
       tick++;
 
       const order = racers.slice().sort((a, b) => b.pos - a.pos);
       const rankMap = new Map(order.map((r, i) => [r.key, i]));
 
       const rhibEmoji = getRhibEmoji(guild);
-      const commentary = rng() < 0.18 ? rand(COMMENTARY, rng) : null;
+      const commentary = rng() < 0.2 ? rand(COMMENTARY, rng) : null;
 
       for (const r of racers) {
         if (r.finished) continue;
@@ -994,6 +1034,14 @@ async function runPartyRace(guild, party) {
         const rk = rankMap.get(r.key) ?? 2;
         step += houseEdgeModifier(rk, racers.length, tier.key, rng);
         step += finalSprintBoost(r.pos, rng);
+
+        // streak penalty for the player who chose this colour
+        const playerEntry = Array.from(party.players.entries()).find(([, p]) => p.colourKey === r.key);
+        if (playerEntry) {
+          const [uid] = playerEntry;
+          const s = getStats(uid);
+          step += streakPenalty(s.winStreak, tier.key, rng);
+        }
 
         step = Math.max(0, Math.min(3, step));
         r.pos += step;
@@ -1019,89 +1067,129 @@ async function runPartyRace(guild, party) {
         return renderLine(r, r.pos, badge, rhibEmoji);
       });
 
+      const lineup = Array.from(party.players.entries())
+        .map(([uid, p]) => {
+          const c = COLOUR_BY_KEY.get(p.colourKey);
+          const crown = uid === party.hostId ? " 👑" : "";
+          return `${c.label} ${tag(uid)}${crown}`;
+        })
+        .join("\n");
+
       const comms = racers
         .filter((r) => r.lastEvent)
         .slice(0, 2)
         .map((r) => `${r.label} ${r.lastEvent}`)
         .join("\n");
 
-      const frameKey = `${lines.join("|")}__${comms}__${commentary || ""}`;
-      if (frameKey !== lastFrameKey) {
+      const frameKey = `${lines.join("|")}__${lineup}__${comms}__${commentary || ""}`;
+      if (lobbyMsg && frameKey !== lastFrameKey) {
         lastFrameKey = frameKey;
-        await msg
-          .edit({
-            embeds: [
-              new EmbedBuilder()
-                .setColor(COLOR_ACCENT)
-                .setTitle(`🏁 ${BRAND} — PARTY LIVE TRACK`)
-                .setDescription(
-                  `${header("PARTY LIVE")}\n\n` +
-                    `🎯 **Tier:** ${tier.emoji} ${tier.label}\n\n` +
-                    `🏁 **Track:**\n${lines.join("\n")}\n\n` +
-                    `📡 **Comms:**\n${comms || "`Seas are calm…`"}\n` +
-                    (commentary ? `\n${commentary}` : "")
-                )
-                .setFooter({ text: FOOTER }),
-            ],
-          })
-          .catch(() => {});
+
+        const e = new EmbedBuilder()
+          .setColor(COLOR_PRIMARY)
+          .setTitle(`🏁 ${BRAND} — PARTY LIVE TRACK FEED`)
+          .setDescription(
+            `${header("MULTIPLAYER LIVE")}\n\n` +
+              `${tier.emoji} **Tier:** ${tier.label}\n\n` +
+              `**Line-up:**\n${lineup}\n\n` +
+              `🏁 **Track:**\n${lines.join("\n")}\n\n` +
+              `📡 **Comms:**\n${comms || "`Engines roaring…`"}\n` +
+              (commentary ? `\n${commentary}` : "")
+          )
+          .setFooter({ text: FOOTER });
+
+        await lobbyMsg.edit({ embeds: [e] }).catch(() => {});
       }
 
-      if (places.length && !raceFinalized) {
-        raceFinalized = true;
+      if (places.length && !party.finalized) {
+        party.finalized = true;
         clearInterval(interval);
 
-        const results = places.map((p) => `${placeBadge(p.place)} ${p.label} — ${tag(p.userId)}`).join("\n");
+        const photoFinish = places[0].finishTick === places[1].finishTick;
+        const placeByKey = new Map(places.map((p) => [p.key, p.place]));
 
-        const payouts = places.map((p) => ({ userId: p.userId, amount: tier.payouts[p.place] || 0 }));
-        for (const p of payouts) {
-          if (p.amount > 0 && !settings.freezePayouts) {
-            await enqueuePayout(guild, p.userId, p.amount);
-          }
-        }
+        const placementSummary = [];
+        const payoutSummary = [];
+        const auditPayoutLines = [];
+        const awardedLines = [];
 
-        for (const p of places) {
-          const s = getStats(p.userId);
-          s.races += 1;
-          if (p.place === 1) s.wins += 1;
-          if (p.place <= 3) s.podiums += 1;
-          s.bestFinish = Math.min(s.bestFinish, p.place);
-          s.totalWon += tier.payouts[p.place] || 0;
+        for (const [uid, p] of party.players.entries()) {
+          const truePlace = placeByKey.get(p.colourKey);
+          const amount = tier.payouts[truePlace] || 0;
+          const c = COLOUR_BY_KEY.get(p.colourKey);
+          const s = getStats(uid);
 
-          if (p.place === 1) {
+          if (truePlace === 1) {
             s.winStreak = (s.winStreak || 0) + 1;
             s.bestWinStreak = Math.max(s.bestWinStreak || 0, s.winStreak);
           } else {
             s.winStreak = 0;
           }
 
-          saveStats();
+          s.bestFinish = Math.min(s.bestFinish, truePlace);
+          if (truePlace === 1) s.wins += 1;
+          if (truePlace <= 3) s.podiums += 1;
+          s.totalWon += amount;
+
+          // achievements
+          const got = [];
+          if (s.races === 1) {
+            const a = awardAchievement(uid, ACH.FIRST_RACE.key);
+            if (a) got.push(a);
+          }
+          if (truePlace === 1) {
+            const a = awardAchievement(uid, ACH.FIRST_WIN.key);
+            if (a) got.push(a);
+            const b = awardAchievement(uid, ACH.PARTY_WIN.key);
+            if (b) got.push(b);
+          }
+          if (photoFinish) {
+            const a = awardAchievement(uid, ACH.PHOTO_FINISH.key);
+            if (a) got.push(a);
+          }
+          if ((s.winStreak || 0) >= 3) {
+            const a = awardAchievement(uid, ACH.STREAK_3.key);
+            if (a) got.push(a);
+          }
+          if ((s.podiums || 0) >= 5) {
+            const a = awardAchievement(uid, ACH.PODIUM_5.key);
+            if (a) got.push(a);
+          }
+
+          if (got.length) {
+            awardedLines.push(
+              `${c.label} ${tag(uid)}: ${got
+                .map((a) => `**${a.name}** (+${a.tokens} ${a.tokens === 1 ? "token" : "tokens"})`)
+                .join(", ")}`
+            );
+          }
+
+          if (amount > 0 && !settings.freezePayouts) {
+            await enqueuePayout(guild, uid, amount);
+          }
+
+          placementSummary.push(`${placeBadge(truePlace)} ${c.label} ${tag(uid)}`);
+          payoutSummary.push(`${c.label} ${tag(uid)} → **${amount.toLocaleString()} ${CURRENCY_NAME}**`);
+          auditPayoutLines.push(`${uid}:${amount}`);
         }
 
-        const winner = places[0];
+        saveStats();
 
-        const awarded = [];
-        const winAch = awardAchievement(winner.userId, ACH.PARTY_WIN.key);
-        if (winAch) awarded.push(winAch);
+        const endEmbed = new EmbedBuilder()
+          .setColor(COLOR_ACCENT)
+          .setTitle(`🏆 ${BRAND} — PARTY RESULTS`)
+          .setDescription(
+            `${header("RACE COMPLETE")}\n\n` +
+              `${tier.emoji} **Tier:** ${tier.label}\n` +
+              (photoFinish ? `📸 **PHOTO FINISH!** VAR called.\n\n` : "\n") +
+              `**Placements:**\n${placementSummary.join("\n")}\n\n` +
+              `**Payouts (Kaos queued):**\n${payoutSummary.join("\n")}\n` +
+              (awardedLines.length ? `\n🏅 **Achievements:**\n${awardedLines.join("\n")}\n` : "\n") +
+              `Create a new lobby with \`/raceparty create\`.`
+          )
+          .setFooter({ text: FOOTER });
 
-        await msg
-          .reply({
-            embeds: [
-              new EmbedBuilder()
-                .setColor(COLOR_PRIMARY)
-                .setTitle(`🏆 ${BRAND} — PARTY RESULT`)
-                .setDescription(
-                  `${header("PARTY COMPLETE")}\n\n` +
-                    `🥇 Winner: ${tag(winner.userId)} (${winner.label})\n\n` +
-                    `**Placements:**\n${results}` +
-                    (awarded.length
-                      ? `\n\n🏅 **Achievements unlocked:**\n${awarded.map((a) => `• **${a.name}**`).join("\n")}`
-                      : "")
-                )
-                .setFooter({ text: FOOTER }),
-            ],
-          })
-          .catch(() => {});
+        if (lobbyMsg) await lobbyMsg.edit({ embeds: [endEmbed] }).catch(() => {});
 
         await auditLog(
           guild,
@@ -1109,10 +1197,15 @@ async function runPartyRace(guild, party) {
             .setColor(COLOR_NEUTRAL)
             .setTitle(`🧾 Audit • PARTY • Season #${statsDB.meta.seasonNumber}`)
             .addFields(
-              { name: "Host", value: `${tag(party.hostId)} (${party.hostId})`, inline: false },
-              { name: "Tier", value: `${tier.emoji} ${tier.label}`, inline: true },
-              { name: "Winner", value: `${tag(winner.userId)}`, inline: true },
-              { name: "Seed", value: `${seed}`, inline: true }
+              { name: "Tier", value: `${tier.emoji} ${tier.label} (cost ${tier.tokenCost})`, inline: true },
+              { name: "Host", value: `${tag(party.hostId)} (${party.hostId})`, inline: true },
+              { name: "Players", value: `${party.players.size}`, inline: true },
+              { name: "Seed", value: `${seed}`, inline: true },
+              {
+                name: "Payouts",
+                value: settings.freezePayouts ? "FROZEN" : auditPayoutLines.join("\n") || "None",
+                inline: false,
+              }
             )
             .setFooter({ text: FOOTER })
         );
@@ -1120,131 +1213,89 @@ async function runPartyRace(guild, party) {
         partyByGuild.delete(guild.id);
       }
     } catch (e) {
-      raceFinalized = true;
+      party.finalized = true;
       clearInterval(interval);
-      console.log("Party race error:", e?.message || e);
       partyByGuild.delete(guild.id);
+      console.log("Party race error:", e?.message || e);
     }
   }, TICK_MS);
 }
-
-// ================== STATS / LEADERBOARDS ==================
-function topBy(key, limit = 10) {
-  const entries = Object.entries(statsDB.users || {});
-  entries.sort((a, b) => (b[1][key] || 0) - (a[1][key] || 0));
-  return entries.slice(0, limit);
+// ================== LEADERBOARDS ==================
+function topBy(field, limit = 10) {
+  const arr = Object.entries(statsDB.users).map(([uid, s]) => ({ uid, ...s }));
+  arr.sort((a, b) => (b[field] || 0) - (a[field] || 0));
+  return arr.slice(0, limit);
 }
 
-function formatTop(entries, key, suffix) {
-  if (!entries.length) return "_No data yet._";
-  return entries
-    .map(([uid, s], i) => `**${i + 1}.** ${tag(uid)} — **${(s[key] || 0).toLocaleString()}** ${suffix}`)
+// Prevents currency showing twice on /top
+function formatTop(arr, field, label) {
+  if (!arr.length) return "`No data yet.`";
+  return arr
+    .map((x, i) => {
+      const val = x[field] ?? 0;
+      const shown = field === "totalWon" ? `${val.toLocaleString()} ${CURRENCY_NAME}` : `${val}`;
+      const suffix = field === "totalWon" ? "" : ` ${label}`;
+      return `**${i + 1}.** ${tag(x.uid)} — **${shown}**${suffix}`;
+    })
     .join("\n");
 }
 
-// ================== COMMANDS ==================
+/* ================== COMMANDS ================== */
+const colourChoices = COLOURS.map((c) => ({ name: `${c.name} ${c.label}`, value: c.key }));
+const tierChoices = [
+  { name: `${TIERS.low.emoji} Low`, value: "low" },
+  { name: `${TIERS.standard.emoji} Standard`, value: "standard" },
+  { name: `${TIERS.high.emoji} High`, value: "high" },
+];
+
 const commandsDef = [
-  new SlashCommandBuilder().setName("racehelp").setDescription("Show the RHIB racing guide"),
-
-  new SlashCommandBuilder().setName("balance").setDescription("Check your token balance"),
-
   new SlashCommandBuilder()
     .setName("race")
-    .setDescription("Start a solo race")
+    .setDescription("Solo RHIB race (pick a colour + tier).")
     .addStringOption((o) =>
       o
         .setName("colour")
-        .setDescription("Choose your RHIB colour")
+        .setDescription("Pick your colour")
         .setRequired(true)
-        .addChoices(
-          { name: "Red", value: "red" },
-          { name: "Blue", value: "blue" },
-          { name: "Green", value: "green" },
-          { name: "Yellow", value: "yellow" },
-          { name: "Purple", value: "purple" }
-        )
+        .addChoices(...colourChoices)
     )
     .addStringOption((o) =>
       o
         .setName("tier")
-        .setDescription("Choose risk tier")
+        .setDescription("Risk tier")
         .setRequired(true)
-        .addChoices(
-          { name: "Low", value: "low" },
-          { name: "Standard", value: "standard" },
-          { name: "High", value: "high" }
-        )
+        .addChoices(...tierChoices)
     ),
 
   new SlashCommandBuilder()
     .setName("raceparty")
-    .setDescription("Party race lobby")
+    .setDescription("Multiplayer party race (auto-starts in 60s)")
     .addSubcommand((sc) =>
       sc
         .setName("create")
-        .setDescription("Create a party lobby")
-        .addStringOption((o) =>
-          o
-            .setName("tier")
-            .setDescription("Choose risk tier")
-            .setRequired(true)
-            .addChoices(
-              { name: "Low", value: "low" },
-              { name: "Standard", value: "standard" },
-              { name: "High", value: "high" }
-            )
-        )
-        .addStringOption((o) =>
-          o
-            .setName("colour")
-            .setDescription("Choose your RHIB colour")
-            .setRequired(true)
-            .addChoices(
-              { name: "Red", value: "red" },
-              { name: "Blue", value: "blue" },
-              { name: "Green", value: "green" },
-              { name: "Yellow", value: "yellow" },
-              { name: "Purple", value: "purple" }
-            )
-        )
+        .setDescription("Create a party lobby (auto-start in 60 seconds)")
+        .addStringOption((o) => o.setName("tier").setDescription("Risk tier").setRequired(true).addChoices(...tierChoices))
+        .addStringOption((o) => o.setName("colour").setDescription("Host colour").setRequired(true).addChoices(...colourChoices))
     )
     .addSubcommand((sc) =>
       sc
         .setName("join")
-        .setDescription("Join an existing party lobby")
-        .addStringOption((o) =>
-          o
-            .setName("colour")
-            .setDescription("Choose your RHIB colour")
-            .setRequired(true)
-            .addChoices(
-              { name: "Red", value: "red" },
-              { name: "Blue", value: "blue" },
-              { name: "Green", value: "green" },
-              { name: "Yellow", value: "yellow" },
-              { name: "Purple", value: "purple" }
-            )
-        )
+        .setDescription("Join the party (unique colour)")
+        .addStringOption((o) => o.setName("colour").setDescription("Pick your colour").setRequired(true).addChoices(...colourChoices))
     )
-    .addSubcommand((sc) => sc.setName("leave").setDescription("Leave the party lobby"))
-    .addSubcommand((sc) => sc.setName("cancel").setDescription("Cancel the party lobby (host only)"))
-    .addSubcommand((sc) => sc.setName("start").setDescription("Start the party race (host only)")),
+    .addSubcommand((sc) => sc.setName("leave").setDescription("Leave the current party"))
+    .addSubcommand((sc) => sc.setName("start").setDescription("Start the party race now (host only)"))
+    .addSubcommand((sc) => sc.setName("cancel").setDescription("Cancel the party lobby (host only)")),
 
-  new SlashCommandBuilder()
-    .setName("racestats")
-    .setDescription("Show your racing stats for this season"),
-
-  new SlashCommandBuilder()
-    .setName("top")
-    .setDescription("Top winnings leaderboard"),
-
-  new SlashCommandBuilder()
-    .setName("topwins")
-    .setDescription("Top wins leaderboard"),
+  new SlashCommandBuilder().setName("racehelp").setDescription("How RHIB Racing works"),
+  new SlashCommandBuilder().setName("balance").setDescription("Check your token balance"),
+  new SlashCommandBuilder().setName("racestats").setDescription("Your racing stats"),
+  new SlashCommandBuilder().setName("top").setDescription("Top 10 by total winnings"),
+  new SlashCommandBuilder().setName("topwins").setDescription("Top 10 by wins"),
 
   new SlashCommandBuilder()
     .setName("tokens")
-    .setDescription("Token commands")
+    .setDescription("Token system for RHIB Racing")
     .addSubcommand((sc) => sc.setName("balance").setDescription("Check your token balance"))
     .addSubcommand((sc) => sc.setName("daily").setDescription("Claim your daily free token"))
     .addSubcommand((sc) =>
@@ -1280,6 +1331,13 @@ const commandsDef = [
     .addSubcommand((sc) => sc.setName("season-info").setDescription("Show current season info (admin)"))
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 ];
+
+// 🌀 Wipe Panel + Map Vote
+const WIPEMAP = createWipeMapSystem(client);
+commandsDef.push(...WIPEMAP.commands);
+
+// ================== MAP VOTE ==================
+const MAPVOTE = createMapVoteSystem(client, commandsDef);
 
 // ================== RULES MENU ==================
 const RULES = createRulesMenuSystem(client);
@@ -1335,6 +1393,7 @@ client.once("ready", async () => {
   console.log(`✅ Online as ${client.user.tag}`);
   console.log(`Season #${statsDB.meta.seasonNumber} started: ${new Date(statsDB.meta.seasonStart).toISOString()}`);
   ONBOARDING.register();
+  WIPEMAP.onReady();
 
   // intent sanity check (giveall needs member fetch)
   try {
@@ -1349,6 +1408,11 @@ client.once("ready", async () => {
 
 client.on("interactionCreate", async (interaction) => {
   try {
+    if (await WIPEMAP.handleInteraction(interaction)) return;
+
+    const handledByMapVote = await MAPVOTE.handleInteraction(interaction);
+    if (handledByMapVote) return;
+
     // ✅ Rules system (/rulesmenu + select + acknowledge)
     const handledByRules = await RULES.handleInteraction(interaction);
     if (handledByRules) return;
@@ -1388,6 +1452,12 @@ client.on("interactionCreate", async (interaction) => {
 
     if (interaction.commandName === "racehelp") {
       return interaction.reply({ embeds: [buildHelpEmbed()], ephemeral: true });
+    }
+
+    if (interaction.commandName === "mapvotepanel") {
+      await interaction.reply({ content: "✅ Map vote panel posted.", ephemeral: true });
+      await MAPVOTE.postPanel(interaction);
+      return;
     }
 
     if (interaction.commandName === "balance") {
