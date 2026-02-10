@@ -95,6 +95,46 @@ async function getTextChannel(client, channelId) {
   return ch;
 }
 
+function createMapVoteSystem(client, commandsDef = []) {
+  const cmd = new SlashCommandBuilder()
+    .setName("mapvotepanel")
+    .setDescription("Post a quick map vote panel (admin)")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
+
+  if (Array.isArray(commandsDef)) commandsDef.push(cmd);
+
+  const embed = new EmbedBuilder()
+    .setColor(COLOR_PRIMARY)
+    .setTitle("🗺️ MAP VOTE")
+    .setDescription("Vote for the next map below.");
+
+  function buttons() {
+    return [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("mapvote:map1").setLabel("Map 1").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId("mapvote:map2").setLabel("Map 2").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId("mapvote:map3").setLabel("Map 3").setStyle(ButtonStyle.Primary)
+      ),
+    ];
+  }
+
+  async function postPanel(interaction) {
+    const channel = interaction.channel;
+    if (!channel || !("send" in channel)) return;
+    await channel.send({ embeds: [embed], components: buttons() }).catch(() => {});
+  }
+
+  async function handleInteraction(interaction) {
+    if (interaction.isButton() && interaction.customId?.startsWith("mapvote:")) {
+      await interaction.reply({ content: "✅ Vote recorded.", ephemeral: true }).catch(() => {});
+      return true;
+    }
+    return false;
+  }
+
+  return { postPanel, handleInteraction };
+}
+
 // ---------------- STORAGE ----------------
 function defaultData() {
   return {
@@ -114,10 +154,7 @@ function defaultData() {
       // Updated when a vote ends:
       nextMapImageUrl: null,
       // Optional extra lines shown on the panel (admin can set):
-      infoLines: [
-        "Monthly wipe • Maps chosen by vote",
-        "Verify → Link Kaos → Read rules",
-      ],
+      infoLines: ["Monthly wipe • Maps chosen by vote", "Verify → Link Kaos → Read rules"],
     },
     vote: null, // active vote
     reminders: {
@@ -183,12 +220,8 @@ function createWipeMapSystem(client) {
   // ---------------- PANEL EMBED ----------------
   function panelEmbed() {
     const w = data.wipe;
-    const last = w.lastWipeUnix
-      ? `**<t:${w.lastWipeUnix}:F>**\n<t:${w.lastWipeUnix}:R>`
-      : "`Not set`";
-    const next = w.nextWipeUnix
-      ? `**<t:${w.nextWipeUnix}:F>**\n**<t:${w.nextWipeUnix}:R>**`
-      : "`Not set`";
+    const last = w.lastWipeUnix ? `**<t:${w.lastWipeUnix}:F>**\n<t:${w.lastWipeUnix}:R>` : "`Not set`";
+    const next = w.nextWipeUnix ? `**<t:${w.nextWipeUnix}:F>**\n**<t:${w.nextWipeUnix}:R>**` : "`Not set`";
 
     const voteStatus = (() => {
       if (!data.vote) return "— `No active vote`";
@@ -199,9 +232,13 @@ function createWipeMapSystem(client) {
     })();
 
     const mapLine = w.currentMapImageUrl ? "✅ **LIVE**" : "⏳ **Awaiting map selection**";
-    const nextMapLine = w.nextMapImageUrl ? "✅ **Locked in**" : (data.vote ? "🗳️ **Voting live**" : "— `Not set`");
+    const nextMapLine = w.nextMapImageUrl ? "✅ **Locked in**" : data.vote ? "🗳️ **Voting live**" : "— `Not set`";
 
-    const info = (w.infoLines || []).slice(0, 6).map(x => `• ${clean(x, 120)}`).join("\n") || "• —";
+    const info =
+      (w.infoLines || [])
+        .slice(0, 6)
+        .map((x) => `• ${clean(x, 120)}`)
+        .join("\n") || "• —";
 
     const e = new EmbedBuilder()
       .setColor(COLOR_PRIMARY)
@@ -218,7 +255,7 @@ function createWipeMapSystem(client) {
         { name: "🧊 LAST WIPE (UTC)", value: last, inline: true },
         { name: "🔥 NEXT WIPE (UTC)", value: next, inline: true },
         { name: "🗳️ MAP VOTE", value: voteStatus, inline: true },
-        { name: "📌 SERVER NOTES", value: info, inline: false },
+        { name: "📌 SERVER NOTES", value: info, inline: false }
       )
       .setFooter({ text: FOOTER })
       .setTimestamp();
@@ -273,14 +310,13 @@ function createWipeMapSystem(client) {
 
     const lines = v.options.map((o, i) => {
       const votes = counts[i];
-      return [
-        `**Map ${i + 1}**`,
-        `\`${bar(votes, total)}\`  **${pct(votes, total)}**  •  \`${votes}\` votes`,
-      ].join("\n");
+      return [`**Map ${i + 1}**`, `\`${bar(votes, total)}\`  **${pct(votes, total)}**  •  \`${votes}\` votes`].join("\n");
     });
 
-    const lockAt = data.wipe.nextWipeUnix ? (data.wipe.nextWipeUnix - AUTOLOCK_BEFORE_WIPE_SEC) : null;
-    const lockLine = lockAt ? `**Auto-lock:** <t:${lockAt}:F> (**<t:${lockAt}:R>**)` : "**Auto-lock:** `Set NEXT wipe to enable`";
+    const lockAt = data.wipe.nextWipeUnix ? data.wipe.nextWipeUnix - AUTOLOCK_BEFORE_WIPE_SEC : null;
+    const lockLine = lockAt
+      ? `**Auto-lock:** <t:${lockAt}:F> (**<t:${lockAt}:R>**)`
+      : "**Auto-lock:** `Set NEXT wipe to enable`";
 
     const nextWipeLine = data.wipe.nextWipeUnix
       ? `**Next wipe:** <t:${data.wipe.nextWipeUnix}:F> (**<t:${data.wipe.nextWipeUnix}:R>**)`
@@ -326,11 +362,13 @@ function createWipeMapSystem(client) {
   }
 
   async function postPreviewsThread(voteMsg, options) {
-    const thread = await voteMsg.startThread({
-      name: "🗺️ Map Previews",
-      autoArchiveDuration: 1440,
-      reason: "Spirals 3X map previews",
-    }).catch(() => null);
+    const thread = await voteMsg
+      .startThread({
+        name: "🗺️ Map Previews",
+        autoArchiveDuration: 1440,
+        reason: "Spirals 3X map previews",
+      })
+      .catch(() => null);
 
     if (!thread) return null;
 
@@ -384,7 +422,9 @@ function createWipeMapSystem(client) {
           reason ? `**Ended:** ${reason}` : "",
           "",
           "✅ The Wipe Schedule panel has been updated with the locked map.",
-        ].filter(Boolean).join("\n")
+        ]
+          .filter(Boolean)
+          .join("\n")
       )
       .setImage(winnerImageUrl)
       .setFooter({ text: FOOTER })
@@ -395,9 +435,8 @@ function createWipeMapSystem(client) {
     if (!data.vote) return;
     const v = data.vote;
 
-    const { bestIdx, bestVotes, counts, total } = pickWinner(v);
+    const { bestIdx, bestVotes, total } = pickWinner(v);
     const winnerOpt = v.options[bestIdx];
-
     // Update panel immediately: NEXT MAP thumbnail + also set "current map" if you want it live now
     // Your request: when voting ends, map updated on panel. We'll lock it in as "next map".
     data.wipe.nextMapImageUrl = winnerOpt.imageUrl;
@@ -473,37 +512,49 @@ function createWipeMapSystem(client) {
     if (REMINDERS.h24 && !data.reminders.sent.h24 && diff <= 24 * 3600 && diff > 23 * 3600) {
       data.reminders.sent.h24 = true;
       saveJson(DATA_FILE, data);
-      await ch.send({
-        content: `${pingText()}🧊 **Wipe reminder — 24 hours**`,
-        embeds: [make(`${BRAND} — WIPE IN 24H`, `**Next wipe:** <t:${next}:F> (**<t:${next}:R>**)\n🗳️ If a map vote is live, lock it in.`)],
-      }).catch(() => {});
+      await ch
+        .send({
+          content: `${pingText()}🧊 **Wipe reminder — 24 hours**`,
+          embeds: [
+            make(`${BRAND} — WIPE IN 24H`, `**Next wipe:** <t:${next}:F> (**<t:${next}:R>**)\n🗳️ If a map vote is live, lock it in.`),
+          ],
+        })
+        .catch(() => {});
     }
 
     if (REMINDERS.h1 && !data.reminders.sent.h1 && diff <= 3600 && diff > 50 * 60) {
       data.reminders.sent.h1 = true;
       saveJson(DATA_FILE, data);
-      await ch.send({
-        content: `${pingText()}🔥 **Wipe reminder — 1 hour**`,
-        embeds: [make(`${BRAND} — WIPE IN 1H`, `**Next wipe:** <t:${next}:F> (**<t:${next}:R>**)\n🔒 Votes may auto-lock around now.`)],
-      }).catch(() => {});
+      await ch
+        .send({
+          content: `${pingText()}🔥 **Wipe reminder — 1 hour**`,
+          embeds: [
+            make(`${BRAND} — WIPE IN 1H`, `**Next wipe:** <t:${next}:F> (**<t:${next}:R>**)\n🔒 Votes may auto-lock around now.`),
+          ],
+        })
+        .catch(() => {});
     }
 
     if (REMINDERS.m10 && !data.reminders.sent.m10 && diff <= 10 * 60 && diff > 8 * 60) {
       data.reminders.sent.m10 = true;
       saveJson(DATA_FILE, data);
-      await ch.send({
-        content: `${pingText()}⚡ **Wipe reminder — 10 minutes**`,
-        embeds: [make(`${BRAND} — WIPE IN 10M`, `**Next wipe:** <t:${next}:F> (**<t:${next}:R>**)`)],
-      }).catch(() => {});
+      await ch
+        .send({
+          content: `${pingText()}⚡ **Wipe reminder — 10 minutes**`,
+          embeds: [make(`${BRAND} — WIPE IN 10M`, `**Next wipe:** <t:${next}:F> (**<t:${next}:R>**)`)],
+        })
+        .catch(() => {});
     }
 
     if (REMINDERS.wipe && !data.reminders.sent.wipe && diff <= 0) {
       data.reminders.sent.wipe = true;
       saveJson(DATA_FILE, data);
-      await ch.send({
-        content: `${pingText()}💥 **WIPE IS LIVE NOW**`,
-        embeds: [make(`${BRAND} — WIPE NOW`, `**Wipe time:** <t:${next}:F>\n🌀 The Spiral resets.`)],
-      }).catch(() => {});
+      await ch
+        .send({
+          content: `${pingText()}💥 **WIPE IS LIVE NOW**`,
+          embeds: [make(`${BRAND} — WIPE NOW`, `**Wipe time:** <t:${next}:F>\n🌀 The Spiral resets.`)],
+        })
+        .catch(() => {});
     }
   }
 
@@ -513,48 +564,50 @@ function createWipeMapSystem(client) {
       .setName("wipe-panel")
       .setDescription("Create the Wipe Schedule panel (admin only)")
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-      .addChannelOption(o => o.setName("channel").setDescription("Channel to post the panel").setRequired(true)),
+      .addChannelOption((o) => o.setName("channel").setDescription("Channel to post the panel").setRequired(true)),
 
     new SlashCommandBuilder()
       .setName("wipe-setup")
       .setDescription("Set channels + settings for wipe/mapvote (admin only)")
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-      .addChannelOption(o => o.setName("vote_channel").setDescription("Where map votes are posted").setRequired(true))
-      .addChannelOption(o => o.setName("results_channel").setDescription("Where results/reminders post (optional)").setRequired(false))
-      .addRoleOption(o => o.setName("ping_role").setDescription("Role ping for reminders/results (optional)").setRequired(false))
-      .addBooleanOption(o => o.setName("reminders").setDescription("Enable wipe reminders (default true)").setRequired(false))
-      .addBooleanOption(o => o.setName("pin_results").setDescription("Auto-pin results (default true)").setRequired(false)),
+      .addChannelOption((o) => o.setName("vote_channel").setDescription("Where map votes are posted").setRequired(true))
+      .addChannelOption((o) => o.setName("results_channel").setDescription("Where results/reminders post (optional)").setRequired(false))
+      .addRoleOption((o) => o.setName("ping_role").setDescription("Role ping for reminders/results (optional)").setRequired(false))
+      .addBooleanOption((o) => o.setName("reminders").setDescription("Enable wipe reminders (default true)").setRequired(false))
+      .addBooleanOption((o) => o.setName("pin_results").setDescription("Auto-pin results (default true)").setRequired(false)),
 
     new SlashCommandBuilder()
       .setName("wipe-set")
       .setDescription("Manually set last/next wipe timestamps (UTC) (admin only)")
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-      .addStringOption(o => o.setName("last_utc").setDescription('Last wipe: "YYYY-MM-DD HH:MM" (UTC)').setRequired(true))
-      .addStringOption(o => o.setName("next_utc").setDescription('Next wipe: "YYYY-MM-DD HH:MM" (UTC)').setRequired(true)),
+      .addStringOption((o) => o.setName("last_utc").setDescription('Last wipe: "YYYY-MM-DD HH:MM" (UTC)').setRequired(true))
+      .addStringOption((o) => o.setName("next_utc").setDescription('Next wipe: "YYYY-MM-DD HH:MM" (UTC)').setRequired(true)),
 
     new SlashCommandBuilder()
       .setName("wipe-map")
       .setDescription("Set the current LIVE map image (admin only)")
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-      .addAttachmentOption(o => o.setName("image").setDescription("Current map image").setRequired(true)),
+      .addAttachmentOption((o) => o.setName("image").setDescription("Current map image").setRequired(true)),
 
     new SlashCommandBuilder()
       .setName("wipe-notes")
       .setDescription("Set panel notes (1-6 lines) (admin only)")
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-      .addStringOption(o => o.setName("lines").setDescription("Separate lines using | (max 6)").setRequired(true)),
+      .addStringOption((o) => o.setName("lines").setDescription("Separate lines using | (max 6)").setRequired(true)),
 
     new SlashCommandBuilder()
       .setName("mapvote-start")
       .setDescription("Start a map vote (images). Maps are generic. (admin only)")
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-      .addIntegerOption(o => o.setName("duration_minutes").setDescription("Vote duration").setRequired(true).setMinValue(1).setMaxValue(720))
-      .addAttachmentOption(o => o.setName("map1_image").setDescription("Map 1 image").setRequired(true))
-      .addAttachmentOption(o => o.setName("map2_image").setDescription("Map 2 image").setRequired(true))
-      .addAttachmentOption(o => o.setName("map3_image").setDescription("Map 3 image (optional)").setRequired(false))
-      .addAttachmentOption(o => o.setName("map4_image").setDescription("Map 4 image (optional)").setRequired(false))
-      .addAttachmentOption(o => o.setName("map5_image").setDescription("Map 5 image (optional)").setRequired(false))
-      .addBooleanOption(o => o.setName("ping").setDescription("Ping configured role when vote starts").setRequired(false)),
+      .addIntegerOption((o) =>
+        o.setName("duration_minutes").setDescription("Vote duration").setRequired(true).setMinValue(1).setMaxValue(720)
+      )
+      .addAttachmentOption((o) => o.setName("map1_image").setDescription("Map 1 image").setRequired(true))
+      .addAttachmentOption((o) => o.setName("map2_image").setDescription("Map 2 image").setRequired(true))
+      .addAttachmentOption((o) => o.setName("map3_image").setDescription("Map 3 image (optional)").setRequired(false))
+      .addAttachmentOption((o) => o.setName("map4_image").setDescription("Map 4 image (optional)").setRequired(false))
+      .addAttachmentOption((o) => o.setName("map5_image").setDescription("Map 5 image (optional)").setRequired(false))
+      .addBooleanOption((o) => o.setName("ping").setDescription("Ping configured role when vote starts").setRequired(false)),
 
     new SlashCommandBuilder()
       .setName("mapvote-end")
@@ -589,10 +642,12 @@ function createWipeMapSystem(client) {
         v.ballots[interaction.user.id] = idx;
         saveJson(DATA_FILE, data);
 
-        await interaction.message.edit({
-          embeds: [voteEmbed(v)],
-          components: voteButtons(v, false),
-        }).catch(() => {});
+        await interaction.message
+          .edit({
+            embeds: [voteEmbed(v)],
+            components: voteButtons(v, false),
+          })
+          .catch(() => {});
 
         return interaction.reply({ content: `✅ Vote cast: **Map ${idx + 1}**`, ephemeral: true });
       }
@@ -632,8 +687,11 @@ function createWipeMapSystem(client) {
         await refreshPanel();
 
         return interaction.reply({
-          content:
-            `✅ Setup saved.\n• Vote: <#${data.config.voteChannelId}>\n• Results: ${data.config.resultsChannelId ? `<#${data.config.resultsChannelId}>` : "`not set (uses panel)`"}\n• Reminders: \`${data.config.remindersEnabled}\`\n• Pin results: \`${data.config.pinResults}\`\n• Ping role: ${data.config.pingRoleId ? `<@&${data.config.pingRoleId}>` : "`none`"}`,
+          content: `✅ Setup saved.\n• Vote: <#${data.config.voteChannelId}>\n• Results: ${
+            data.config.resultsChannelId ? `<#${data.config.resultsChannelId}>` : "`not set (uses panel)`"
+          }\n• Reminders: \`${data.config.remindersEnabled}\`\n• Pin results: \`${data.config.pinResults}\`\n• Ping role: ${
+            data.config.pingRoleId ? `<@&${data.config.pingRoleId}>` : "`none`"
+          }`,
           ephemeral: true,
         });
       }
@@ -678,7 +736,11 @@ function createWipeMapSystem(client) {
 
       if (name === "wipe-notes") {
         const raw = interaction.options.getString("lines", true);
-        const parts = raw.split("|").map(s => clean(s, 120)).filter(Boolean).slice(0, 6);
+        const parts = raw
+          .split("|")
+          .map((s) => clean(s, 120))
+          .filter(Boolean)
+          .slice(0, 6);
         data.wipe.infoLines = parts.length ? parts : defaultData().wipe.infoLines.slice();
         saveJson(DATA_FILE, data);
         await refreshPanel();
@@ -688,7 +750,9 @@ function createWipeMapSystem(client) {
       if (name === "mapvote-start") {
         if (data.vote) return interaction.reply({ content: "❌ A vote is already active.", ephemeral: true });
         if (!data.config.voteChannelId) return interaction.reply({ content: "❌ Run `/wipe-setup` first.", ephemeral: true });
-        if (!data.config.panelChannelId || !data.config.panelMessageId) return interaction.reply({ content: "❌ Run `/wipe-panel` first.", ephemeral: true });
+        if (!data.config.panelChannelId || !data.config.panelMessageId) {
+          return interaction.reply({ content: "❌ Run `/wipe-panel` first.", ephemeral: true });
+        }
 
         const duration = interaction.options.getInteger("duration_minutes", true);
         const ping = interaction.options.getBoolean("ping") || false;
@@ -803,4 +867,4 @@ function createWipeMapSystem(client) {
   };
 }
 
-module.exports = { createWipeMapSystem };
+module.exports = { createMapVoteSystem, createWipeMapSystem };
