@@ -518,6 +518,38 @@ ${next}`].join("\n\n");
     }
   }
 
+
+  function normalizeWipeSchedule() {
+    const { lastWipeUnix, nextWipeUnix } = data.wipe;
+    if (!lastWipeUnix || !nextWipeUnix) return false;
+
+    const cycle = nextWipeUnix - lastWipeUnix;
+    if (!Number.isFinite(cycle) || cycle <= 0) return false;
+
+    const now = nowUnix();
+    let last = lastWipeUnix;
+    let next = nextWipeUnix;
+    let changed = false;
+
+    // Keep schedule usable without manual edits when a wipe window has passed.
+    // Uses existing manual cadence (next-last) and advances in full cycles.
+    while (next <= now && cycle > 0) {
+      last = next;
+      next += cycle;
+      changed = true;
+      if (next - now > cycle * 36) break;
+    }
+
+    if (!changed) return false;
+
+    data.wipe.lastWipeUnix = last;
+    data.wipe.nextWipeUnix = next;
+    data.reminders.nextWipeKey = String(next);
+    data.reminders.sent = { h24: false, h1: false, m10: false, wipe: false };
+    saveJson(DATA_FILE, data);
+    return true;
+  }
+
   async function sendRemindersIfDue() {
     if (!data.config.remindersEnabled) return;
     if (!data.wipe.nextWipeUnix) return;
@@ -886,6 +918,9 @@ ${next}`].join("\n\n");
 
   async function tick() {
     try {
+      // Keep manual cadence rolling when the configured wipe date has passed.
+      normalizeWipeSchedule();
+
       // Auto-lock vote before wipe (only works if NEXT wipe set)
       await autoLockVoteIfDue();
 
@@ -909,6 +944,9 @@ ${next}`].join("\n\n");
     if (data.wipe.nextWipeUnix) {
       data.reminders.nextWipeKey = String(data.wipe.nextWipeUnix);
     }
+
+    // Normalize once on boot so panel timers are not stale after downtime.
+    normalizeWipeSchedule();
     saveJson(DATA_FILE, data);
 
     if (!intervalHandle) intervalHandle = setInterval(tick, 60 * 1000);
