@@ -76,7 +76,7 @@ function signalRows() {
 
   SIGNALS.slice(3, 6).forEach((s) => {
     row2.addComponents(
-      new ButtonBuilder().setCustomId(`sig:${s.key}`).setLabel(s.label).setEmoji(s.emoji).setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId(`sig:${s.key}`).setLabel(s.label).setEmoji(s.emoji).setStyle(ButtonStyle.Primary)
     );
   });
 
@@ -84,20 +84,27 @@ function signalRows() {
 }
 
 function signalEmbed() {
-  const lines = SIGNALS.map((s) => `${s.emoji} <@&${s.roleId}> — ${s.desc}`).join("\n");
+  const lines = [
+    `🎁 <@&${SIGNALS[0].roleId}> — Giveaway drops and winner calls.`,
+    `🗳️ <@&${SIGNALS[1].roleId}> — Poll opens, closes, and outcomes.`,
+    `💡 <@&${SIGNALS[2].roleId}> — Suggestion updates and staff decisions.`,
+    `📅 <@&${SIGNALS[3].roleId}> — Event announcements and reminders.`,
+    `🚨 <@&${SIGNALS[4].roleId}> — Alerts when your team is being raided in-game.`,
+    `☢️ <@&${SIGNALS[5].roleId}> — Nuke drop alerts so you can claim point rewards.`,
+  ].join("\n");
   return new EmbedBuilder()
     .setColor(COLOR_PRIMARY)
     .setTitle(`🛰️ ${BRAND} — SIGNAL HUB`)
     .setDescription(
       [
-        "Choose the alerts you want from the Spiral.",
+        "The Spiral whispers only to those tuned in.",
         "",
-        "Click any button to **toggle** your role on or off.",
+        "Touch a signal below to bind it to your role profile.",
         "",
         lines,
       ].join("\n")
     )
-    .setFooter({ text: "Signal Roles • Toggle anytime • Clean alerts only" })
+    .setFooter({ text: "Spiral Signal Matrix • Tune in or tune out anytime" })
     .setTimestamp();
 }
 
