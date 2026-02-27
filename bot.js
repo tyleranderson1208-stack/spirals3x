@@ -13,6 +13,8 @@ const { createOnboardingSystem } = require("./onboarding");
 const { createRulesMenuSystem } = require("./rulesmenu");
 const { createMapVoteSystem } = require("./mapvote");
 const { createWipeMapSystem } = require("./mapvote");
+const { createGiveawaySystem } = require("./giveaways");
+const { createSignalRolesSystem } = require("./signalroles");
 
 const {
   Client,
@@ -1364,6 +1366,14 @@ const ONBOARDING = createOnboardingSystem(client, {
   welcomeDeleteAfterHours: process.env.WELCOME_DELETE_AFTER_HOURS || "24",
 });
 
+/* ================== GIVEAWAYS ================== */
+const GIVEAWAYS = createGiveawaySystem(client, commandsDef, {
+  DATA_DIR,
+});
+
+/* ================== SIGNAL ROLES ================== */
+const SIGNALROLES = createSignalRolesSystem(client, commandsDef);
+
 /* ================== SUGGESTIONS ================== */
 const SUGGESTIONS = createSuggestionSystem(client, commandsDef, {
   BRAND,
@@ -1394,6 +1404,7 @@ client.once("ready", async () => {
   console.log(`Season #${statsDB.meta.seasonNumber} started: ${new Date(statsDB.meta.seasonStart).toISOString()}`);
   ONBOARDING.register();
   WIPEMAP.onReady();
+  GIVEAWAYS.onReady();
 
   // intent sanity check (giveall needs member fetch)
   try {
@@ -1412,6 +1423,10 @@ client.on("interactionCreate", async (interaction) => {
 
     const handledByMapVote = await MAPVOTE.handleInteraction(interaction);
     if (handledByMapVote) return;
+
+    if (await GIVEAWAYS.handleInteraction(interaction)) return;
+
+    if (await SIGNALROLES.handleInteraction(interaction)) return;
 
     // ✅ Rules system (/rulesmenu + select + acknowledge)
     const handledByRules = await RULES.handleInteraction(interaction);
