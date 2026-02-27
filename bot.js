@@ -14,6 +14,7 @@ const { createRulesMenuSystem } = require("./rulesmenu");
 const { createMapVoteSystem } = require("./mapvote");
 const { createWipeMapSystem } = require("./mapvote");
 const { createGiveawaySystem } = require("./giveaways");
+const { createSignalRolesSystem } = require("./signalroles");
 
 const {
   Client,
@@ -1370,6 +1371,9 @@ const GIVEAWAYS = createGiveawaySystem(client, commandsDef, {
   DATA_DIR,
 });
 
+/* ================== SIGNAL ROLES ================== */
+const SIGNALROLES = createSignalRolesSystem(client, commandsDef);
+
 /* ================== SUGGESTIONS ================== */
 const SUGGESTIONS = createSuggestionSystem(client, commandsDef, {
   BRAND,
@@ -1421,6 +1425,8 @@ client.on("interactionCreate", async (interaction) => {
     if (handledByMapVote) return;
 
     if (await GIVEAWAYS.handleInteraction(interaction)) return;
+
+    if (await SIGNALROLES.handleInteraction(interaction)) return;
 
     // ✅ Rules system (/rulesmenu + select + acknowledge)
     const handledByRules = await RULES.handleInteraction(interaction);
