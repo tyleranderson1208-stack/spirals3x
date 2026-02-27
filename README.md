@@ -13,8 +13,8 @@ A Discord bot for the RUSTYREDS 3X RHIB racing game with tiers, achievements, pa
 The bot now includes a fully customizable giveaway module with:
 - `/giveaway-setup` (channel/log/ping/reminders)
 - `/giveaway-panel` (staff control panel)
-- `/giveaway-start` (custom prize, visuals, role requirements, account/server age gates)
-- `/giveaway-end`, `/giveaway-reroll`, `/giveaway-status`
+- `/giveaway-start` (custom prize, visuals, required/bonus role rules, optional winner role reward)
+- `/giveaway-schedule`, `/giveaway-end`, `/giveaway-reroll`, `/giveaway-status`
 
 ### Optional environment variables
 
