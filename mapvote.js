@@ -17,8 +17,9 @@
  *   • When vote ends: the panel updates with the winning map image immediately
  *   • Maps are generic (Map 1/Map 2/Map 3...) — no custom names required
  *
- * Manual wipe times:
- * - You set LAST and NEXT wipe timestamps via /wipe-set
+ * Wipe scheduling:
+ * - Manual override via /wipe-set
+ * - Auto schedule defaults to every 2 weeks (Friday 18:00 UTC)
  * - Optional reminders can fire relative to NEXT wipe (24h/1h/10m/wipe)
  *
  * Integration (bot.js):
@@ -39,7 +40,10 @@ const {
   ButtonBuilder,
   ButtonStyle,
   PermissionsBitField,
+  ChannelType,
 } = require("discord.js");
+const { createStaffPanelEmbed } = require("./staffinfo");
+const { DEFAULT_STATS_CATEGORY_ID, createWipeStatsTools } = require("./wipestats");
 
 // ---------------- THEME ----------------
 const BRAND = "🌀 SPIRALS 3X";
@@ -160,6 +164,12 @@ function defaultData() {
     config: {
       panelChannelId: null,
       panelMessageId: null,
+      staffPanelChannelId: null,
+      staffPanelMessageId: null,
+      statsCategoryId: DEFAULT_STATS_CATEGORY_ID,
+      memberStatsChannelId: null,
+      nextWipeStatsChannelId: null,
+      statsLocked: true,
       voteChannelId: null,
       resultsChannelId: null,
       pingRoleId: null,
@@ -240,6 +250,14 @@ function createWipeMapSystem(client) {
     saveJson(DATA_FILE, data);
   })();
 
+  const { resetReminderState, ensureAutoWipeInitialized, rollAutoWipeScheduleIfDue, refreshStatsChannels } =
+    createWipeStatsTools({
+      client,
+      data,
+      saveData: () => saveJson(DATA_FILE, data),
+      nowUnix,
+    });
+
   // ---------------- PANEL EMBED ----------------
   function panelEmbed() {
     const w = data.wipe;
@@ -309,6 +327,14 @@ Next: ${timelineNext}`, inline: false },
     return e;
   }
 
+  function staffEmbed() {
+    return createStaffPanelEmbed({
+      brand: BRAND,
+      color: COLOR_ACCENT,
+      footer: FOOTER,
+    });
+  }
+
   async function refreshPanel() {
     const { panelChannelId, panelMessageId } = data.config;
     if (!panelChannelId || !panelMessageId) return;
@@ -320,6 +346,20 @@ Next: ${timelineNext}`, inline: false },
     if (!msg) return;
 
     await msg.edit({ embeds: [panelEmbed()] }).catch(() => {});
+  }
+
+
+  async function refreshStaffPanel() {
+    const { staffPanelChannelId, staffPanelMessageId } = data.config;
+    if (!staffPanelChannelId || !staffPanelMessageId) return;
+
+    const ch = await getTextChannel(client, staffPanelChannelId);
+    if (!ch || !("messages" in ch)) return;
+
+    const msg = await ch.messages.fetch(staffPanelMessageId).catch(() => null);
+    if (!msg) return;
+
+    await msg.edit({ embeds: [staffEmbed()] }).catch(() => {});
   }
 
   function pingText() {
@@ -613,6 +653,21 @@ Next: ${timelineNext}`, inline: false },
       .addChannelOption((o) => o.setName("channel").setDescription("Channel to post the panel").setRequired(true)),
 
     new SlashCommandBuilder()
+      .setName("staff-panel")
+      .setDescription("Create the Staff Info panel (admin only)")
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addChannelOption((o) => o.setName("channel").setDescription("Channel to post the staff panel").setRequired(true)),
+
+    new SlashCommandBuilder()
+      .setName("stats-channels")
+      .setDescription("Create/update the member + next wipe stat voice channels (admin only)")
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addChannelOption((o) =>
+        o.setName("category").setDescription("Category for stats voice channels").addChannelTypes(ChannelType.GuildCategory).setRequired(false)
+      )
+      .addBooleanOption((o) => o.setName("locked").setDescription("Lock channels from joining (default true)").setRequired(false)),
+
+    new SlashCommandBuilder()
       .setName("wipe-setup")
       .setDescription("Set channels + settings for wipe/mapvote (admin only)")
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
@@ -718,7 +773,7 @@ Next: ${timelineNext}`, inline: false },
       if (!interaction.isChatInputCommand()) return false;
 
       const name = interaction.commandName;
-      const adminOnly = ["wipe-panel", "wipe-setup", "wipe-set", "wipe-map", "wipe-notes", "wipe-style", "mapvote-start", "mapvote-end"].includes(name);
+      const adminOnly = ["wipe-panel", "staff-panel", "stats-channels", "wipe-setup", "wipe-set", "wipe-map", "wipe-notes", "wipe-style", "mapvote-start", "mapvote-end"].includes(name);
       if (adminOnly && !isAdmin(interaction)) return interaction.reply({ content: "❌ Admin only.", ephemeral: true });
 
       if (name === "wipe-panel") {
@@ -730,6 +785,37 @@ Next: ${timelineNext}`, inline: false },
         saveJson(DATA_FILE, data);
 
         return interaction.reply({ content: `✅ Wipe panel created in <#${ch.id}>`, ephemeral: true });
+      }
+
+      if (name === "staff-panel") {
+        const ch = interaction.options.getChannel("channel", true);
+        const msg = await ch.send({ embeds: [staffEmbed()] });
+
+        data.config.staffPanelChannelId = ch.id;
+        data.config.staffPanelMessageId = msg.id;
+        saveJson(DATA_FILE, data);
+
+        return interaction.reply({ content: `✅ Staff panel created in <#${ch.id}>`, ephemeral: true });
+      }
+
+      if (name === "stats-channels") {
+        const category = interaction.options.getChannel("category", false);
+        const locked = interaction.options.getBoolean("locked");
+
+        if (category) data.config.statsCategoryId = category.id;
+        if (typeof locked === "boolean") data.config.statsLocked = locked;
+
+        saveJson(DATA_FILE, data);
+        await refreshStatsChannels();
+
+        return interaction.reply({
+          content: `✅ Stats channels synced.
+• Category: ${
+            data.config.statsCategoryId ? `<#${data.config.statsCategoryId}>` : "`none`"
+          }
+• Locked: \`${data.config.statsLocked}\``,
+          ephemeral: true,
+        });
       }
 
       if (name === "wipe-setup") {
@@ -776,8 +862,7 @@ Next: ${timelineNext}`, inline: false },
         data.wipe.nextWipeUnix = nextUnix;
 
         // Reset reminder state when next wipe changes
-        data.reminders.nextWipeKey = String(nextUnix);
-        data.reminders.sent = { h24: false, h1: false, m10: false, wipe: false };
+        resetReminderState(nextUnix);
 
         saveJson(DATA_FILE, data);
         await refreshPanel();
@@ -914,9 +999,13 @@ Next: ${timelineNext}`, inline: false },
 
   // ---------------- LOOP ----------------
   let intervalHandle = null;
+  let lastStatsSyncUnix = 0;
 
   async function tick() {
     try {
+      ensureAutoWipeInitialized();
+      rollAutoWipeScheduleIfDue();
+
       // Auto-lock vote before wipe (only works if NEXT wipe set)
       await autoLockVoteIfDue();
 
@@ -930,12 +1019,20 @@ Next: ${timelineNext}`, inline: false },
 
       // Keep panel fresh (timers)
       await refreshPanel();
+      await refreshStaffPanel();
+
+      if (nowUnix() - lastStatsSyncUnix >= 5 * 60) {
+        lastStatsSyncUnix = nowUnix();
+        await refreshStatsChannels();
+      }
     } catch (e) {
       console.error("wipemap tick error:", e);
     }
   }
 
   function onReady() {
+    ensureAutoWipeInitialized();
+
     // Ensure reminder key is synced
     if (data.wipe.nextWipeUnix) {
       data.reminders.nextWipeKey = String(data.wipe.nextWipeUnix);
