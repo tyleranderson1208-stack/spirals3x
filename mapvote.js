@@ -345,7 +345,21 @@ Next: ${timelineNext}`, inline: false },
     const msg = await ch.messages.fetch(panelMessageId).catch(() => null);
     if (!msg) return;
 
-    await msg.edit({ embeds: [panelEmbed()] }).catch(() => {});
+    await msg.edit({ embeds: [panelEmbed(), staffEmbed()] }).catch(() => {});
+  }
+
+
+  async function refreshStaffPanel() {
+    const { staffPanelChannelId, staffPanelMessageId } = data.config;
+    if (!staffPanelChannelId || !staffPanelMessageId) return;
+
+    const ch = await getTextChannel(client, staffPanelChannelId);
+    if (!ch || !("messages" in ch)) return;
+
+    const msg = await ch.messages.fetch(staffPanelMessageId).catch(() => null);
+    if (!msg) return;
+
+    await msg.edit({ embeds: [staffEmbed()] }).catch(() => {});
   }
 
 
@@ -778,7 +792,7 @@ Next: ${timelineNext}`, inline: false },
 
       if (name === "wipe-panel") {
         const ch = interaction.options.getChannel("channel", true);
-        const msg = await ch.send({ embeds: [panelEmbed()] });
+        const msg = await ch.send({ embeds: [panelEmbed(), staffEmbed()] });
 
         data.config.panelChannelId = ch.id;
         data.config.panelMessageId = msg.id;
