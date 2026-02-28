@@ -12,6 +12,8 @@ const {
 
 const BRAND = "🌀 SPIRALS 3X";
 const COLOR_PRIMARY = 0xb100ff;
+const UI_FOOTER = process.env.UI_FOOTER || "🌀 SPIRALS 3X • RHIB Racing";
+const SIGNAL_BANNER_URL = process.env.SIGNAL_HUB_BANNER_URL || "https://media.discordapp.net/attachments/1468941702801916045/1477090974139416748/3c4cd911-5998-4ab3-9116-276822e0c73b.png?ex=69a37fab&is=69a22e2b&hm=37a719fd1f44227f96d07f8e98302a6041074c96084002bc52de889a62ddf328&=&format=webp&quality=lossless&width=385&height=257";
 
 const DEFAULT_PANEL_CHANNEL_ID = process.env.SIGNAL_ROLES_CHANNEL_ID || "1465517573108928628";
 
@@ -97,14 +99,15 @@ function signalEmbed() {
     .setTitle(`🛰️ ${BRAND} — SIGNAL HUB`)
     .setDescription(
       [
-        "The Spiral whispers only to those tuned in.",
+        "The Spiral calls — align your signal path.",
         "",
-        "Touch a signal below to bind it to your role profile.",
+        "Choose a channel and the alerts will find you when it matters.",
         "",
         lines,
       ].join("\n")
     )
-    .setFooter({ text: "Spiral Signal Matrix • Tune in or tune out anytime" })
+    .setFooter({ text: UI_FOOTER })
+    .setImage(SIGNAL_BANNER_URL)
     .setTimestamp();
 }
 
