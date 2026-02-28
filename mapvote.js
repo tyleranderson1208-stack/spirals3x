@@ -161,6 +161,8 @@ function defaultData() {
     config: {
       panelChannelId: null,
       panelMessageId: null,
+      staffPanelChannelId: null,
+      staffPanelMessageId: null,
       voteChannelId: null,
       resultsChannelId: null,
       pingRoleId: null,
@@ -329,6 +331,20 @@ Next: ${timelineNext}`, inline: false },
     if (!msg) return;
 
     await msg.edit({ embeds: [panelEmbed(), staffEmbed()] }).catch(() => {});
+  }
+
+
+  async function refreshStaffPanel() {
+    const { staffPanelChannelId, staffPanelMessageId } = data.config;
+    if (!staffPanelChannelId || !staffPanelMessageId) return;
+
+    const ch = await getTextChannel(client, staffPanelChannelId);
+    if (!ch || !("messages" in ch)) return;
+
+    const msg = await ch.messages.fetch(staffPanelMessageId).catch(() => null);
+    if (!msg) return;
+
+    await msg.edit({ embeds: [staffEmbed()] }).catch(() => {});
   }
 
   function pingText() {
@@ -622,6 +638,12 @@ Next: ${timelineNext}`, inline: false },
       .addChannelOption((o) => o.setName("channel").setDescription("Channel to post the panel").setRequired(true)),
 
     new SlashCommandBuilder()
+      .setName("staff-panel")
+      .setDescription("Create the Staff Info panel (admin only)")
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addChannelOption((o) => o.setName("channel").setDescription("Channel to post the staff panel").setRequired(true)),
+
+    new SlashCommandBuilder()
       .setName("wipe-setup")
       .setDescription("Set channels + settings for wipe/mapvote (admin only)")
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
@@ -727,7 +749,7 @@ Next: ${timelineNext}`, inline: false },
       if (!interaction.isChatInputCommand()) return false;
 
       const name = interaction.commandName;
-      const adminOnly = ["wipe-panel", "wipe-setup", "wipe-set", "wipe-map", "wipe-notes", "wipe-style", "mapvote-start", "mapvote-end"].includes(name);
+      const adminOnly = ["wipe-panel", "staff-panel", "wipe-setup", "wipe-set", "wipe-map", "wipe-notes", "wipe-style", "mapvote-start", "mapvote-end"].includes(name);
       if (adminOnly && !isAdmin(interaction)) return interaction.reply({ content: "❌ Admin only.", ephemeral: true });
 
       if (name === "wipe-panel") {
@@ -739,6 +761,17 @@ Next: ${timelineNext}`, inline: false },
         saveJson(DATA_FILE, data);
 
         return interaction.reply({ content: `✅ Wipe panel created in <#${ch.id}>`, ephemeral: true });
+      }
+
+      if (name === "staff-panel") {
+        const ch = interaction.options.getChannel("channel", true);
+        const msg = await ch.send({ embeds: [staffEmbed()] });
+
+        data.config.staffPanelChannelId = ch.id;
+        data.config.staffPanelMessageId = msg.id;
+        saveJson(DATA_FILE, data);
+
+        return interaction.reply({ content: `✅ Staff panel created in <#${ch.id}>`, ephemeral: true });
       }
 
       if (name === "wipe-setup") {
@@ -939,6 +972,7 @@ Next: ${timelineNext}`, inline: false },
 
       // Keep panel fresh (timers)
       await refreshPanel();
+      await refreshStaffPanel();
     } catch (e) {
       console.error("wipemap tick error:", e);
     }
