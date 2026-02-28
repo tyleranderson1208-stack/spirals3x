@@ -40,6 +40,7 @@ const {
   ButtonStyle,
   PermissionsBitField,
 } = require("discord.js");
+const { createStaffPanelEmbed } = require("./staffinfo");
 
 // ---------------- THEME ----------------
 const BRAND = "🌀 SPIRALS 3X";
@@ -309,6 +310,14 @@ Next: ${timelineNext}`, inline: false },
     return e;
   }
 
+  function staffEmbed() {
+    return createStaffPanelEmbed({
+      brand: BRAND,
+      color: COLOR_ACCENT,
+      footer: FOOTER,
+    });
+  }
+
   async function refreshPanel() {
     const { panelChannelId, panelMessageId } = data.config;
     if (!panelChannelId || !panelMessageId) return;
@@ -319,7 +328,7 @@ Next: ${timelineNext}`, inline: false },
     const msg = await ch.messages.fetch(panelMessageId).catch(() => null);
     if (!msg) return;
 
-    await msg.edit({ embeds: [panelEmbed()] }).catch(() => {});
+    await msg.edit({ embeds: [panelEmbed(), staffEmbed()] }).catch(() => {});
   }
 
   function pingText() {
@@ -723,7 +732,7 @@ Next: ${timelineNext}`, inline: false },
 
       if (name === "wipe-panel") {
         const ch = interaction.options.getChannel("channel", true);
-        const msg = await ch.send({ embeds: [panelEmbed()] });
+        const msg = await ch.send({ embeds: [panelEmbed(), staffEmbed()] });
 
         data.config.panelChannelId = ch.id;
         data.config.panelMessageId = msg.id;
