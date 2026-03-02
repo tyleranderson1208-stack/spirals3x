@@ -117,10 +117,6 @@ function createSuggestionSystem(client, commandsDef, opts = {}) {
     return SUGGESTION_PING_ROLE_ID ? `<@&${SUGGESTION_PING_ROLE_ID}>` : "";
   }
 
-  function header(title) {
-    // match your race style, but premium + calmer
-    return `**${title}** • ${BRAND} • ${EMOJI} SUGGESTIONS`;
-  }
 
   function statusBadge(status) {
     switch (status) {
@@ -151,19 +147,29 @@ function createSuggestionSystem(client, commandsDef, opts = {}) {
     return new EmbedBuilder()
       .setColor(COLOR_ACCENT)
       .setTitle(`${EMOJI} Suggestions Dock — ${BRAND}`)
-      .setDescription(
-        `${header("WELCOME")}\n\n` +
-          `Got an idea that could make **SPIRALS** better?\n` +
-          `Drop it here — every suggestion becomes a premium card with a **3-day** live discussion window.\n\n` +
-          `**How it works**\n` +
-          `• Submit using the button below\n` +
-          `• One vote per member (you can change it)\n` +
-          `• Discussion stays open for **${SUGGESTION_ACTIVE_DAYS} days**\n\n` +
-          `**Guidelines**\n` +
-          `• One clear idea per suggestion\n` +
-          `• Be constructive (quality > quantity)\n` +
-          `• No spam or joke submissions\n\n` +
-          `📡 Want to browse? Head to <#${SUGGESTIONS_CHANNEL_ID}>`
+      .setDescription("Clear ideas. Clean feedback. Better server decisions.")
+      .addFields(
+        {
+          name: "How it works",
+          value:
+            `↳ Submit using the button below\n` +
+            `↳ One vote per member (you can change it)\n` +
+            `↳ Discussion stays open for **${SUGGESTION_ACTIVE_DAYS} days**`,
+          inline: false,
+        },
+        {
+          name: "Guidelines",
+          value:
+            "↳ One clear idea per suggestion\n" +
+            "↳ Be constructive (quality > quantity)\n" +
+            "↳ No spam or joke submissions",
+          inline: false,
+        },
+        {
+          name: "Suggestions Feed",
+          value: SUGGESTIONS_CHANNEL_ID ? `↳ Head to <#${SUGGESTIONS_CHANNEL_ID}>` : "↳ Not configured yet",
+          inline: false,
+        }
       )
       .setFooter({ text: FOOTER });
   }
@@ -190,17 +196,14 @@ function createSuggestionSystem(client, commandsDef, opts = {}) {
     return new EmbedBuilder()
       .setColor(sug.status === "ACCEPTED" ? COLOR_PRIMARY : sug.status === "DECLINED" ? 0x2a0010 : COLOR_NEUTRAL)
       .setTitle(`${EMOJI} Suggestion #${String(sug.id).padStart(3, "0")}`)
-      .setDescription(
-        `${header("SIGNAL RECEIVED")}\n\n` +
-          `> ${String(sug.content || "").trim().slice(0, 1800)}\n\n` +
-          `**Status:** ${statusBadge(sug.status)}\n` +
-          `**Submitted by:** ${tag(sug.authorId)}\n` +
-          `**Created:** <t:${createdTs}:R>\n\n` +
-          `🧵 **Discussion:** ${sug.threadId ? `<#${sug.threadId}>` : "_Creating…_"}`
-      )
+      .setDescription(`> ${String(sug.content || "").trim().slice(0, 1800)}`)
       .addFields(
-        { name: "Votes", value: `👍 **${up}**   👎 **${down}**`, inline: true },
-        { name: "Window", value: `💬 Active for **${SUGGESTION_ACTIVE_DAYS} days**`, inline: true }
+        { name: "Status", value: `↳ ${statusBadge(sug.status)}`, inline: true },
+        { name: "Submitted", value: `↳ ${tag(sug.authorId)}`, inline: true },
+        { name: "Created", value: `↳ <t:${createdTs}:R>`, inline: true },
+        { name: "Discussion", value: `↳ ${sug.threadId ? `<#${sug.threadId}>` : "_Creating…_"}`, inline: false },
+        { name: "Votes", value: `↳ 👍 **${up}**   👎 **${down}**`, inline: true },
+        { name: "Window", value: `↳ Active for **${SUGGESTION_ACTIVE_DAYS} days**`, inline: true }
       )
       .setFooter({ text: FOOTER });
   }
@@ -316,10 +319,10 @@ function createSuggestionSystem(client, commandsDef, opts = {}) {
       await thread
         .send({
           content:
-            `${header("DISCUSSION THREAD")}\n\n` +
-            `💬 This thread stays open for **${SUGGESTION_ACTIVE_DAYS} days**.\n` +
-            `Keep it constructive. Staff will update the status on the main card.\n\n` +
-            `**Submitted by:** ${tag(sug.authorId)}`,
+            `💬 **Suggestion Discussion**\n\n` +
+            `↳ This thread stays open for **${SUGGESTION_ACTIVE_DAYS} days**\n` +
+            `↳ Keep it constructive. Staff updates happen on the main card.\n\n` +
+            `↳ Submitted by: ${tag(sug.authorId)}`,
         })
         .catch(() => {});
     }
