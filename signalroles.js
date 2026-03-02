@@ -86,12 +86,14 @@ function signalRows() {
 }
 
 function signalEmbed() {
-  const lineA = `<@&${SIGNALS[0].roleId}> — Giveaway drops and winner calls.`;
-  const lineB = `<@&${SIGNALS[1].roleId}> — Poll opens, closes, and outcomes.`;
-  const lineC = `<@&${SIGNALS[2].roleId}> — Suggestion updates and staff decisions.`;
-  const lineD = `<@&${SIGNALS[3].roleId}> — Event announcements and reminders.`;
-  const lineE = `<@&${SIGNALS[4].roleId}> — Alerts when your team is being raided in-game.`;
-  const lineF = `<@&${SIGNALS[5].roleId}> — Nuke drop alerts so you can claim point rewards.`;
+  const lines = [
+    `<@&${SIGNALS[0].roleId}>\n↳ Giveaway drops and winner calls.`,
+    `<@&${SIGNALS[1].roleId}>\n↳ Poll opens, closes, and outcomes.`,
+    `<@&${SIGNALS[2].roleId}>\n↳ Suggestion updates and staff decisions.`,
+    `<@&${SIGNALS[3].roleId}>\n↳ Event announcements and reminders.`,
+    `<@&${SIGNALS[4].roleId}>\n↳ Alerts when your team is being raided in-game.`,
+    `<@&${SIGNALS[5].roleId}>\n↳ Nuke drop alerts so you can claim point rewards.`,
+  ].join("\n\n");
 
   return new EmbedBuilder()
     .setColor(COLOR_PRIMARY)
