@@ -183,6 +183,12 @@ function createSignalRolesSystem(client, commandsDef = []) {
       return true;
     }
 
+    const sent = await ch.send({ embeds: [signalEmbed()], components: signalRows() }).catch(() => null);
+    if (!sent) {
+      await interaction.reply({ content: "❌ Failed to post signal panel (check channel permissions).", ephemeral: true }).catch(() => {});
+      return true;
+    }
+
     await interaction.reply({ content: `✅ Signal panel posted in <#${channelId}>.`, ephemeral: true }).catch(() => {});
     return true;
   }

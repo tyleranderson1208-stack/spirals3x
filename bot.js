@@ -1408,6 +1408,20 @@ if (!EMBEDPANEL) {
   globalThis.__SPIRALS_EMBEDPANEL__ = EMBEDPANEL;
 }
 
+/* ================== EMBED PANEL ================== */
+function getEmbedPanelSingleton() {
+  if (!globalThis.__SPIRALS_EMBEDPANEL__) {
+    globalThis.__SPIRALS_EMBEDPANEL__ = createEmbedPanelSystem(client, commandsDef, {
+      BRAND,
+      FOOTER,
+      COLOR_ACCENT,
+      DATA_DIR,
+    });
+  }
+  return globalThis.__SPIRALS_EMBEDPANEL__;
+}
+var EMBEDPANEL = getEmbedPanelSingleton();
+
 /* ================== SUGGESTIONS ================== */
 const SUGGESTIONS = createSuggestionSystem(client, commandsDef, {
   BRAND,
@@ -1460,6 +1474,8 @@ client.on("interactionCreate", async (interaction) => {
     if (handledByMapVote) return;
 
     if (await GIVEAWAYS.handleInteraction(interaction)) return;
+
+    if (await EMBEDPANEL.handleInteraction(interaction)) return;
 
     if (await EMBEDPANEL.handleInteraction(interaction)) return;
 
