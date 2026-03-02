@@ -1372,7 +1372,7 @@ const GIVEAWAYS = createGiveawaySystem(client, commandsDef, {
 });
 
 /* ================== EMBED PANEL ================== */
-const EMBEDPANEL = createEmbedPanelSystem(client, {
+const EMBEDPANEL = createEmbedPanelSystem(client, commandsDef, {
   BRAND,
   FOOTER,
   COLOR_ACCENT,

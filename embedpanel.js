@@ -11,6 +11,8 @@ const {
   TextInputBuilder,
   TextInputStyle,
   PermissionsBitField,
+  SlashCommandBuilder,
+  PermissionFlagsBits,
 } = require("discord.js");
 
 function ensureDir(dir) {
@@ -47,7 +49,7 @@ function parseColor(input, fallback) {
   return parseInt(norm, 16);
 }
 
-function createEmbedPanelSystem(client, opts = {}) {
+function createEmbedPanelSystem(client, commandsDef = [], opts = {}) {
   const BRAND = opts.BRAND || "🌀 SPIRALS 3X";
   const FOOTER = opts.FOOTER || "🌀 SPIRALS 3X";
   const COLOR_ACCENT = opts.COLOR_ACCENT ?? 0xb100ff;
@@ -58,6 +60,15 @@ function createEmbedPanelSystem(client, opts = {}) {
   const STATE_FILE = path.join(DATA_DIR, "embedpanel.json");
 
   const state = loadJsonSafe(STATE_FILE, { panelChannelId: PANEL_CHANNEL_ID, panelMessageId: null });
+
+  const commands = [
+    new SlashCommandBuilder()
+      .setName("embed-panel")
+      .setDescription("Post or refresh the embed creator panel (staff/admin)")
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addChannelOption((o) => o.setName("channel").setDescription("Channel to post the embed creator panel").setRequired(false)),
+  ];
+  if (Array.isArray(commandsDef)) commandsDef.push(...commands);
 
   function saveState() {
     saveJson(STATE_FILE, state);
@@ -96,6 +107,19 @@ function createEmbedPanelSystem(client, opts = {}) {
     return ch;
   }
 
+  async function postPanelInChannel(channelId) {
+    const ch = await getTextChannel(channelId);
+    if (!ch || !("messages" in ch)) return null;
+
+    const msg = await ch.send({ embeds: [panelEmbed()], components: panelComponents() }).catch(() => null);
+    if (!msg) return null;
+
+    state.panelChannelId = ch.id;
+    state.panelMessageId = msg.id;
+    saveState();
+    return msg;
+  }
+
   async function upsertPanelMessage() {
     const channelId = state.panelChannelId || PANEL_CHANNEL_ID;
     const ch = await getTextChannel(channelId);
@@ -118,6 +142,30 @@ function createEmbedPanelSystem(client, opts = {}) {
 
   async function handleInteraction(interaction) {
     try {
+      if (interaction.isChatInputCommand() && interaction.commandName === "embed-panel") {
+        if (!canUse(interaction)) {
+          await interaction.reply({ content: "❌ Staff only.", ephemeral: true }).catch(() => {});
+          return true;
+        }
+
+        const target = interaction.options.getChannel("channel", false);
+        const channelId = target?.id || state.panelChannelId || PANEL_CHANNEL_ID || interaction.channelId;
+        if (!channelId) {
+          await interaction.reply({ content: "❌ No panel channel configured.", ephemeral: true }).catch(() => {});
+          return true;
+        }
+
+        await interaction.deferReply({ ephemeral: true }).catch(() => {});
+        const posted = await postPanelInChannel(channelId);
+        if (!posted) {
+          await interaction.editReply({ content: "❌ Failed to post embed creator panel in target channel." }).catch(() => {});
+          return true;
+        }
+
+        await interaction.editReply({ content: `✅ Embed creator panel posted in <#${channelId}>.` }).catch(() => {});
+        return true;
+      }
+
       if (interaction.isButton() && interaction.customId === "embedpanel:create") {
         if (!canUse(interaction)) {
           await interaction.reply({ content: "❌ Staff only.", ephemeral: true }).catch(() => {});
