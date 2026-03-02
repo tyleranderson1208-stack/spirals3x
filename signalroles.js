@@ -72,13 +72,13 @@ function signalRows() {
 
   SIGNALS.slice(0, 3).forEach((s) => {
     row1.addComponents(
-      new ButtonBuilder().setCustomId(`sig:${s.key}`).setLabel(s.label).setEmoji(s.emoji).setStyle(ButtonStyle.Primary)
+      new ButtonBuilder().setCustomId(`sig:${s.key}`).setLabel(s.label).setStyle(ButtonStyle.Primary)
     );
   });
 
   SIGNALS.slice(3, 6).forEach((s) => {
     row2.addComponents(
-      new ButtonBuilder().setCustomId(`sig:${s.key}`).setLabel(s.label).setEmoji(s.emoji).setStyle(ButtonStyle.Primary)
+      new ButtonBuilder().setCustomId(`sig:${s.key}`).setLabel(s.label).setStyle(ButtonStyle.Primary)
     );
   });
 
@@ -97,15 +97,25 @@ function signalEmbed() {
 
   return new EmbedBuilder()
     .setColor(COLOR_PRIMARY)
-    .setTitle(`🛰️ ${BRAND} — SIGNAL HUB`)
+    .setTitle(`${BRAND} — SIGNAL HUB`)
     .setDescription(
       [
         "The Spiral calls — align your signal path.",
         "",
         "Choose a channel and the alerts will find you when it matters.",
-        "",
-        lines,
       ].join("\n")
+    )
+    .addFields(
+      {
+        name: "Signal Groups",
+        value: `${lineA}\n${lineB}\n${lineC}`,
+        inline: false,
+      },
+      {
+        name: "Alert Groups",
+        value: `${lineD}\n${lineE}\n${lineF}`,
+        inline: false,
+      }
     )
     .setFooter({ text: UI_FOOTER })
     .setImage(SIGNAL_BANNER_URL)
