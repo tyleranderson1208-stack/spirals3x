@@ -14,6 +14,7 @@ const { createRulesMenuSystem } = require("./rulesmenu");
 const { createMapVoteSystem } = require("./mapvote");
 const { createWipeMapSystem } = require("./mapvote");
 const { createGiveawaySystem } = require("./giveaways");
+const { createSignalRolesSystem } = require("./signalroles");
 const { createEmbedPanelSystem } = require("./embedpanel");
 
 const {
@@ -1379,6 +1380,14 @@ const EMBEDPANEL = createEmbedPanelSystem(client, commandsDef, {
   DATA_DIR,
 });
 
+/* ================== EMBED PANEL ================== */
+const EMBEDPANEL = createEmbedPanelSystem(client, commandsDef, {
+  BRAND,
+  FOOTER,
+  COLOR_ACCENT,
+  DATA_DIR,
+});
+
 /* ================== SUGGESTIONS ================== */
 const SUGGESTIONS = createSuggestionSystem(client, commandsDef, {
   BRAND,
@@ -1431,6 +1440,8 @@ client.on("interactionCreate", async (interaction) => {
     if (handledByMapVote) return;
 
     if (await GIVEAWAYS.handleInteraction(interaction)) return;
+
+    if (await EMBEDPANEL.handleInteraction(interaction)) return;
 
     if (await EMBEDPANEL.handleInteraction(interaction)) return;
 
