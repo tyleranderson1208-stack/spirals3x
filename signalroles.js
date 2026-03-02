@@ -72,13 +72,13 @@ function signalRows() {
 
   SIGNALS.slice(0, 3).forEach((s) => {
     row1.addComponents(
-      new ButtonBuilder().setCustomId(`sig:${s.key}`).setLabel(s.label).setEmoji(s.emoji).setStyle(ButtonStyle.Primary)
+      new ButtonBuilder().setCustomId(`sig:${s.key}`).setLabel(s.label).setStyle(ButtonStyle.Primary)
     );
   });
 
   SIGNALS.slice(3, 6).forEach((s) => {
     row2.addComponents(
-      new ButtonBuilder().setCustomId(`sig:${s.key}`).setLabel(s.label).setEmoji(s.emoji).setStyle(ButtonStyle.Primary)
+      new ButtonBuilder().setCustomId(`sig:${s.key}`).setLabel(s.label).setStyle(ButtonStyle.Primary)
     );
   });
 
@@ -86,25 +86,34 @@ function signalRows() {
 }
 
 function signalEmbed() {
-  const lines = [
-    `🎁 <@&${SIGNALS[0].roleId}> — Giveaway drops and winner calls.`,
-    `🗳️ <@&${SIGNALS[1].roleId}> — Poll opens, closes, and outcomes.`,
-    `💡 <@&${SIGNALS[2].roleId}> — Suggestion updates and staff decisions.`,
-    `📅 <@&${SIGNALS[3].roleId}> — Event announcements and reminders.`,
-    `🚨 <@&${SIGNALS[4].roleId}> — Alerts when your team is being raided in-game.`,
-    `☢️ <@&${SIGNALS[5].roleId}> — Nuke drop alerts so you can claim point rewards.`,
-  ].join("\n");
+  const lineA = `<@&${SIGNALS[0].roleId}> — Giveaway drops and winner calls.`;
+  const lineB = `<@&${SIGNALS[1].roleId}> — Poll opens, closes, and outcomes.`;
+  const lineC = `<@&${SIGNALS[2].roleId}> — Suggestion updates and staff decisions.`;
+  const lineD = `<@&${SIGNALS[3].roleId}> — Event announcements and reminders.`;
+  const lineE = `<@&${SIGNALS[4].roleId}> — Alerts when your team is being raided in-game.`;
+  const lineF = `<@&${SIGNALS[5].roleId}> — Nuke drop alerts so you can claim point rewards.`;
+
   return new EmbedBuilder()
     .setColor(COLOR_PRIMARY)
-    .setTitle(`🛰️ ${BRAND} — SIGNAL HUB`)
+    .setTitle(`${BRAND} — SIGNAL HUB`)
     .setDescription(
       [
         "The Spiral calls — align your signal path.",
         "",
         "Choose a channel and the alerts will find you when it matters.",
-        "",
-        lines,
       ].join("\n")
+    )
+    .addFields(
+      {
+        name: "Signal Groups",
+        value: `${lineA}\n${lineB}\n${lineC}`,
+        inline: false,
+      },
+      {
+        name: "Alert Groups",
+        value: `${lineD}\n${lineE}\n${lineF}`,
+        inline: false,
+      }
     )
     .setFooter({ text: UI_FOOTER })
     .setImage(SIGNAL_BANNER_URL)
