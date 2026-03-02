@@ -175,8 +175,10 @@ function createSignalRolesSystem(client, commandsDef = []) {
 
       if (!interaction.isChatInputCommand() || interaction.commandName !== "signals-panel") return false;
 
+      await interaction.deferReply({ ephemeral: true }).catch(() => {});
+
       if (!isAdmin(interaction)) {
-        await interaction.reply({ content: "❌ Admin only.", ephemeral: true }).catch(() => {});
+        await interaction.editReply({ content: "❌ Admin only." }).catch(() => {});
         return true;
       }
 
@@ -184,17 +186,17 @@ function createSignalRolesSystem(client, commandsDef = []) {
       const channelId = channelOpt?.id || DEFAULT_PANEL_CHANNEL_ID;
       const ch = await client.channels.fetch(channelId).catch(() => null);
       if (!ch || !("send" in ch)) {
-        await interaction.reply({ content: "❌ Target channel is not accessible.", ephemeral: true }).catch(() => {});
+        await interaction.editReply({ content: "❌ Target channel is not accessible." }).catch(() => {});
         return true;
       }
 
       const sent = await ch.send({ embeds: [signalEmbed()], components: signalRows() }).catch(() => null);
       if (!sent) {
-        await interaction.reply({ content: "❌ Failed to post signal panel (check channel permissions).", ephemeral: true }).catch(() => {});
+        await interaction.editReply({ content: "❌ Failed to post signal panel (check channel permissions)." }).catch(() => {});
         return true;
       }
 
-      await interaction.reply({ content: `✅ Signal panel posted in <#${channelId}>.`, ephemeral: true }).catch(() => {});
+      await interaction.editReply({ content: `✅ Signal panel posted in <#${channelId}>.` }).catch(() => {});
       return true;
     } catch (e) {
       console.error("signalroles handleInteraction error:", e?.message || e);
