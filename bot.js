@@ -1372,8 +1372,29 @@ const GIVEAWAYS = createGiveawaySystem(client, commandsDef, {
   DATA_DIR,
 });
 
-/* ================== SIGNAL ROLES ================== */
-const SIGNALROLES = createSignalRolesSystem(client, commandsDef);
+/* ================== EMBED PANEL ================== */
+const EMBEDPANEL = createEmbedPanelSystem(client, commandsDef, {
+  BRAND,
+  FOOTER,
+  COLOR_ACCENT,
+  DATA_DIR,
+});
+
+/* ================== EMBED PANEL ================== */
+const EMBEDPANEL = createEmbedPanelSystem(client, commandsDef, {
+  BRAND,
+  FOOTER,
+  COLOR_ACCENT,
+  DATA_DIR,
+});
+
+/* ================== EMBED PANEL ================== */
+const EMBEDPANEL = createEmbedPanelSystem(client, commandsDef, {
+  BRAND,
+  FOOTER,
+  COLOR_ACCENT,
+  DATA_DIR,
+});
 
 /* ================== EMBED PANEL ================== */
 var EMBEDPANEL = globalThis.__SPIRALS_EMBEDPANEL__;
@@ -1440,7 +1461,11 @@ client.on("interactionCreate", async (interaction) => {
 
     if (await GIVEAWAYS.handleInteraction(interaction)) return;
 
-    if (await SIGNALROLES.handleInteraction(interaction)) return;
+    if (await EMBEDPANEL.handleInteraction(interaction)) return;
+
+    if (await EMBEDPANEL.handleInteraction(interaction)) return;
+
+    if (await EMBEDPANEL.handleInteraction(interaction)) return;
 
     if (await EMBEDPANEL.handleInteraction(interaction)) return;
 
