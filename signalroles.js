@@ -134,56 +134,75 @@ function createSignalRolesSystem(client, commandsDef = []) {
   if (Array.isArray(commandsDef)) commandsDef.push(...commands);
 
   async function handleInteraction(interaction) {
-    if (interaction.isButton() && interaction.customId?.startsWith("sig:")) {
-      const key = interaction.customId.split(":")[1] || "";
-      const signal = SIGNALS.find((s) => s.key === key);
-      if (!signal) {
-        await interaction.reply({ content: "❌ Unknown signal role.", ephemeral: true }).catch(() => {});
+    try {
+      if (interaction.isButton() && interaction.customId?.startsWith("sig:")) {
+        const key = interaction.customId.split(":")[1] || "";
+        const signal = SIGNALS.find((s) => s.key === key);
+        if (!signal) {
+          await interaction.reply({ content: "❌ Unknown signal role.", ephemeral: true }).catch(() => {});
+          return true;
+        }
+
+        const guild = interaction.guild;
+        const memberId = interaction.user?.id;
+        if (!guild || !memberId) {
+          await interaction.reply({ content: "❌ Server/member context unavailable.", ephemeral: true }).catch(() => {});
+          return true;
+        }
+
+        const member = await guild.members.fetch(memberId).catch(() => null);
+        if (!member) {
+          await interaction.reply({ content: "❌ Could not load your member profile.", ephemeral: true }).catch(() => {});
+          return true;
+        }
+
+        const role = await guild.roles.fetch(signal.roleId).catch(() => null);
+        if (!role) {
+          await interaction.reply({ content: `❌ Role for ${signal.label} is missing.`, ephemeral: true }).catch(() => {});
+          return true;
+        }
+
+        const has = member.roles.cache.has(role.id);
+        if (has) {
+          await member.roles.remove(role.id).catch(() => {});
+          await interaction.reply({ content: `↩️ Removed **${signal.label}** alerts.`, ephemeral: true }).catch(() => {});
+        } else {
+          await member.roles.add(role.id).catch(() => {});
+          await interaction.reply({ content: `✅ Added **${signal.label}** alerts.`, ephemeral: true }).catch(() => {});
+        }
         return true;
       }
 
-      const guild = interaction.guild;
-      const member = interaction.member;
-      if (!guild || !member) {
-        await interaction.reply({ content: "❌ Server/member context unavailable.", ephemeral: true }).catch(() => {});
+      if (!interaction.isChatInputCommand() || interaction.commandName !== "signals-panel") return false;
+
+      if (!isAdmin(interaction)) {
+        await interaction.reply({ content: "❌ Admin only.", ephemeral: true }).catch(() => {});
         return true;
       }
 
-      const role = await guild.roles.fetch(signal.roleId).catch(() => null);
-      if (!role) {
-        await interaction.reply({ content: `❌ Role for ${signal.label} is missing.`, ephemeral: true }).catch(() => {});
+      const channelOpt = interaction.options.getChannel("channel", false);
+      const channelId = channelOpt?.id || DEFAULT_PANEL_CHANNEL_ID;
+      const ch = await client.channels.fetch(channelId).catch(() => null);
+      if (!ch || !("send" in ch)) {
+        await interaction.reply({ content: "❌ Target channel is not accessible.", ephemeral: true }).catch(() => {});
         return true;
       }
 
-      const has = member.roles?.cache?.has(role.id);
-      if (has) {
-        await member.roles.remove(role.id).catch(() => {});
-        await interaction.reply({ content: `↩️ Removed **${signal.label}** alerts.`, ephemeral: true }).catch(() => {});
-      } else {
-        await member.roles.add(role.id).catch(() => {});
-        await interaction.reply({ content: `✅ Added **${signal.label}** alerts.`, ephemeral: true }).catch(() => {});
+      const sent = await ch.send({ embeds: [signalEmbed()], components: signalRows() }).catch(() => null);
+      if (!sent) {
+        await interaction.reply({ content: "❌ Failed to post signal panel (check channel permissions).", ephemeral: true }).catch(() => {});
+        return true;
+      }
+
+      await interaction.reply({ content: `✅ Signal panel posted in <#${channelId}>.`, ephemeral: true }).catch(() => {});
+      return true;
+    } catch (e) {
+      console.error("signalroles handleInteraction error:", e?.message || e);
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: "❌ Signal panel error (check terminal).", ephemeral: true }).catch(() => {});
       }
       return true;
     }
-
-    if (!interaction.isChatInputCommand() || interaction.commandName !== "signals-panel") return false;
-
-    if (!isAdmin(interaction)) {
-      await interaction.reply({ content: "❌ Admin only.", ephemeral: true }).catch(() => {});
-      return true;
-    }
-
-    const channelOpt = interaction.options.getChannel("channel", false);
-    const channelId = channelOpt?.id || DEFAULT_PANEL_CHANNEL_ID;
-    const ch = await client.channels.fetch(channelId).catch(() => null);
-    if (!ch || !("send" in ch)) {
-      await interaction.reply({ content: "❌ Target channel is not accessible.", ephemeral: true }).catch(() => {});
-      return true;
-    }
-
-    await ch.send({ embeds: [signalEmbed()], components: signalRows() }).catch(() => {});
-    await interaction.reply({ content: `✅ Signal panel posted in <#${channelId}>.`, ephemeral: true }).catch(() => {});
-    return true;
   }
 
   return { name: "signalroles", commands, handleInteraction };
