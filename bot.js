@@ -1396,6 +1396,18 @@ const EMBEDPANEL = createEmbedPanelSystem(client, commandsDef, {
   DATA_DIR,
 });
 
+/* ================== EMBED PANEL ================== */
+var EMBEDPANEL = globalThis.__SPIRALS_EMBEDPANEL__;
+if (!EMBEDPANEL) {
+  EMBEDPANEL = createEmbedPanelSystem(client, commandsDef, {
+    BRAND,
+    FOOTER,
+    COLOR_ACCENT,
+    DATA_DIR,
+  });
+  globalThis.__SPIRALS_EMBEDPANEL__ = EMBEDPANEL;
+}
+
 /* ================== SUGGESTIONS ================== */
 const SUGGESTIONS = createSuggestionSystem(client, commandsDef, {
   BRAND,
@@ -1448,6 +1460,8 @@ client.on("interactionCreate", async (interaction) => {
     if (handledByMapVote) return;
 
     if (await GIVEAWAYS.handleInteraction(interaction)) return;
+
+    if (await EMBEDPANEL.handleInteraction(interaction)) return;
 
     if (await EMBEDPANEL.handleInteraction(interaction)) return;
 

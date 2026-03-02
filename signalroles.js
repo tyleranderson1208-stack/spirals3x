@@ -165,11 +165,9 @@ function createSignalRolesSystem(client, commandsDef = []) {
 
     if (!interaction.isChatInputCommand() || !["signals-panel", "signal-panel"].includes(interaction.commandName)) return false;
 
-      await respondEphemeral(interaction, `✅ Signal panel posted in <#${channelId}>.`);
-      return true;
-    } catch (e) {
-      console.error("signalroles handleInteraction error:", e?.message || e);
-      await respondEphemeral(interaction, "❌ Signal panel error (check terminal).");
+    const sent = await ch.send({ embeds: [signalEmbed()], components: signalRows() }).catch(() => null);
+    if (!sent) {
+      await interaction.reply({ content: "❌ Failed to post signal panel (check channel permissions).", ephemeral: true }).catch(() => {});
       return true;
     }
 
