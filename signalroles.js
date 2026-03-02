@@ -73,6 +73,11 @@ function createSignalRolesSystem(client, commandsDef = []) {
       .setDescription("Post the SPIRALS signal roles panel (admin)")
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
       .addChannelOption((o) => o.setName("channel").setDescription("Where to post the signal panel").setRequired(false)),
+    new SlashCommandBuilder()
+      .setName("signal-panel")
+      .setDescription("Post the SPIRALS signal roles panel (admin)")
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+      .addChannelOption((o) => o.setName("channel").setDescription("Where to post the signal panel").setRequired(false)),
   ];
 
   if (Array.isArray(commandsDef)) commandsDef.push(...commands);
@@ -155,12 +160,22 @@ function createSignalRolesSystem(client, commandsDef = []) {
         await member.roles.add(role.id).catch(() => {});
         await interaction.reply({ content: `✅ Added **${signal.label}** alerts.`, ephemeral: true }).catch(() => {});
       }
+      return true;
+    }
+
+    if (!interaction.isChatInputCommand() || !["signals-panel", "signal-panel"].includes(interaction.commandName)) return false;
 
       await respondEphemeral(interaction, `✅ Signal panel posted in <#${channelId}>.`);
       return true;
     } catch (e) {
       console.error("signalroles handleInteraction error:", e?.message || e);
       await respondEphemeral(interaction, "❌ Signal panel error (check terminal).");
+      return true;
+    }
+
+    const sent = await ch.send({ embeds: [signalEmbed()], components: signalRows() }).catch(() => null);
+    if (!sent) {
+      await interaction.reply({ content: "❌ Failed to post signal panel (check channel permissions).", ephemeral: true }).catch(() => {});
       return true;
     }
 
