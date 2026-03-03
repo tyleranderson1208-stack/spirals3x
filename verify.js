@@ -11,7 +11,7 @@ const {
 } = require("discord.js");
 
 const DEFAULT_COLOR = 0xb100ff;
-const DEFAULT_FOOTER = "🌀 SPIRALS 3X • Verification Protocol";
+const DEFAULT_FOOTER = ":blackhole: STELLAR 3X • Verification Protocol";
 
 function getChannelMention(channelId) {
   return channelId ? `<#${channelId}>` : "";
@@ -32,9 +32,9 @@ function buildPanelEmbed({
 }) {
   const embed = new EmbedBuilder()
     .setColor(colorAccent ?? DEFAULT_COLOR)
-    .setTitle("🌀 The Threshold — SPIRALS 3X")
+    .setTitle(":blackhole: The Threshold — STELLAR 3X")
     .setDescription(
-      "Welcome to SPIRALS 3X.\n\n" +
+      "Welcome to STELLAR 3X.\n\n" +
         "You’re standing at the edge of the Spiral.\n" +
         "Press Verify to step through and unlock the server.\n\n" +
         "If you ever lose access, return here and press Verify again."
@@ -69,7 +69,7 @@ function buildNextStepsEmbed({
     .setColor(colorAccent ?? DEFAULT_COLOR)
     .setTitle("✅ Marked by the Spiral")
     .setDescription(
-      "Welcome to SPIRALS 3X.\n" +
+      "Welcome to STELLAR 3X.\n" +
         "The threshold is behind you.\n" +
         "Your role has been bound, and the spiral now recognizes you as one of its own.\n\n" +
         "**Your next movements**\n" +

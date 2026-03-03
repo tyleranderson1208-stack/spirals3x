@@ -13,7 +13,7 @@ const {
   ButtonStyle,
 } = require("discord.js");
 
-const BRAND = "🌀 SPIRALS 3X";
+const BRAND = ":blackhole: STELLAR 3X";
 const COLOR_PRIMARY = 0xb100ff;
 const COLOR_ACCENT = 0x00e5ff;
 
