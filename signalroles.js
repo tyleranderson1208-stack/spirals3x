@@ -20,12 +20,55 @@ const SIGNAL_BANNER_URL =
 const DEFAULT_PANEL_CHANNEL_ID = process.env.SIGNAL_ROLES_CHANNEL_ID || "1465517573108928628";
 
 const SIGNALS = [
-  { key: "giveaways", label: "Giveaways", emoji: "🎁", roleId: process.env.SIGNAL_ROLE_GIVEAWAYS || "1477073449259106528" },
-  { key: "polls", label: "Polls", emoji: "🗳️", roleId: process.env.SIGNAL_ROLE_POLLS || "1477073705606840451" },
-  { key: "suggestions", label: "Suggestions", emoji: "💡", roleId: process.env.SIGNAL_ROLE_SUGGESTIONS || "1477073787240583289" },
-  { key: "events", label: "Events", emoji: "📅", roleId: process.env.SIGNAL_ROLE_EVENTS || "1477073813739933847" },
-  { key: "raid", label: "Raid Alerts", emoji: "🚨", roleId: process.env.SIGNAL_ROLE_RAID || "1477073911572070583" },
-  { key: "nuke", label: "Nuke Alerts", emoji: "☢️", roleId: process.env.SIGNAL_ROLE_NUKE || "1477073963694686281" },
+  {
+    key: "giveaways",
+    label: "Giveaways",
+    emoji: "🎁",
+    roleId: process.env.SIGNAL_ROLE_GIVEAWAYS || "1477073449259106528",
+    description: "Giveaway drops and winner calls.",
+  },
+  {
+    key: "polls",
+    label: "Polls",
+    emoji: "🗳️",
+    roleId: process.env.SIGNAL_ROLE_POLLS || "1477073705606840451",
+    description: "Poll opens, closes, and outcomes.",
+  },
+  {
+    key: "suggestions",
+    label: "Suggestions",
+    emoji: "💡",
+    roleId: process.env.SIGNAL_ROLE_SUGGESTIONS || "1477073787240583289",
+    description: "Suggestion updates and staff decisions.",
+  },
+  {
+    key: "events",
+    label: "Events",
+    emoji: "📅",
+    roleId: process.env.SIGNAL_ROLE_EVENTS || "1477073813739933847",
+    description: "Event announcements and reminders.",
+  },
+  {
+    key: "raid",
+    label: "Raid Alerts",
+    emoji: "🚨",
+    roleId: process.env.SIGNAL_ROLE_RAID || "1477073911572070583",
+    description: "Alerts when your team is being raided in-game.",
+  },
+  {
+    key: "nuke",
+    label: "Nuke Alerts",
+    emoji: "☢️",
+    roleId: process.env.SIGNAL_ROLE_NUKE || "1477073963694686281",
+    description: "Nuke drop alerts so you can claim point rewards.",
+  },
+  {
+    key: "wipe",
+    label: "Wipe Alerts",
+    emoji: "🗺️",
+    roleId: process.env.SIGNAL_ROLE_WIPE || "1478395613719691274",
+    description: "Wipe-related alerts like map voting updates and countdowns.",
+  },
 ];
 
 function isAdmin(interaction) {
@@ -33,29 +76,21 @@ function isAdmin(interaction) {
 }
 
 function signalRows() {
-  const row1 = new ActionRowBuilder();
-  const row2 = new ActionRowBuilder();
-
-  SIGNALS.slice(0, 3).forEach((s) => {
-    row1.addComponents(new ButtonBuilder().setCustomId(`sig:${s.key}`).setLabel(s.label).setEmoji(s.emoji).setStyle(ButtonStyle.Primary));
-  });
-
-  SIGNALS.slice(3, 6).forEach((s) => {
-    row2.addComponents(new ButtonBuilder().setCustomId(`sig:${s.key}`).setLabel(s.label).setEmoji(s.emoji).setStyle(ButtonStyle.Primary));
-  });
-
-  return [row1, row2];
+  const rows = [];
+  for (let i = 0; i < SIGNALS.length; i += 5) {
+    const row = new ActionRowBuilder();
+    SIGNALS.slice(i, i + 5).forEach((signal) => {
+      row.addComponents(
+        new ButtonBuilder().setCustomId(`sig:${signal.key}`).setLabel(signal.label).setEmoji(signal.emoji).setStyle(ButtonStyle.Primary)
+      );
+    });
+    rows.push(row);
+  }
+  return rows;
 }
 
 function signalEmbed() {
-  const lines = [
-    `<@&${SIGNALS[0].roleId}>\n↳ Giveaway drops and winner calls.`,
-    `<@&${SIGNALS[1].roleId}>\n↳ Poll opens, closes, and outcomes.`,
-    `<@&${SIGNALS[2].roleId}>\n↳ Suggestion updates and staff decisions.`,
-    `<@&${SIGNALS[3].roleId}>\n↳ Event announcements and reminders.`,
-    `<@&${SIGNALS[4].roleId}>\n↳ Alerts when your team is being raided in-game.`,
-    `<@&${SIGNALS[5].roleId}>\n↳ Nuke drop alerts so you can claim point rewards.`,
-  ].join("\n\n");
+  const lines = SIGNALS.map((signal) => `<@&${signal.roleId}>\n↳ ${signal.description}`).join("\n\n");
 
   return new EmbedBuilder()
     .setColor(COLOR_PRIMARY)
