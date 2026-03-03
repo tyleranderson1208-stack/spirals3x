@@ -558,6 +558,20 @@ Next: ${timelineNext}`, inline: false },
     await msg.edit({ embeds: [staffEmbed()] }).catch(() => {});
   }
 
+
+  async function refreshStaffPanel() {
+    const { staffPanelChannelId, staffPanelMessageId } = data.config;
+    if (!staffPanelChannelId || !staffPanelMessageId) return;
+
+    const ch = await getTextChannel(client, staffPanelChannelId);
+    if (!ch || !("messages" in ch)) return;
+
+    const msg = await ch.messages.fetch(staffPanelMessageId).catch(() => null);
+    if (!msg) return;
+
+    await msg.edit({ embeds: [staffEmbed()] }).catch(() => {});
+  }
+
   function pingText() {
     if (!data.config.pingRoleId) return "";
     return `<@&${data.config.pingRoleId}> `;
