@@ -132,15 +132,15 @@ function createSignalRolesSystem(client, commandsDef = []) {
         return true;
       }
 
-      const guild = interaction.guild;
-      if (!guild) {
-        await interaction.reply({ content: "❌ Server context unavailable.", ephemeral: true }).catch(() => {});
+      if (!interaction.isChatInputCommand() || !["signals-panel", "signal-panel"].includes(interaction.commandName)) return false;
+      if (!isAdmin(interaction)) {
+        await respondEphemeral(interaction, "❌ Admin only.");
         return true;
       }
 
-      const member = await guild.members.fetch(interaction.user.id).catch(() => null);
-      if (!member) {
-        await interaction.reply({ content: "❌ Could not load your member profile.", ephemeral: true }).catch(() => {});
+      const guild = interaction.guild;
+      if (!guild) {
+        await respondEphemeral(interaction, "❌ Server context unavailable.");
         return true;
       }
 
@@ -152,45 +152,19 @@ function createSignalRolesSystem(client, commandsDef = []) {
         return true;
       }
 
-      const has = member.roles.cache.has(role.id);
-      if (has) {
-        await member.roles.remove(role.id).catch(() => {});
-        await interaction.reply({ content: `↩️ Removed **${signal.label}** alerts.`, ephemeral: true }).catch(() => {});
-      } else {
-        await member.roles.add(role.id).catch(() => {});
-        await interaction.reply({ content: `✅ Added **${signal.label}** alerts.`, ephemeral: true }).catch(() => {});
+      const sent = await ch.send({ embeds: [signalEmbed()], components: signalRows() }).catch(() => null);
+      if (!sent) {
+        await respondEphemeral(interaction, "❌ Failed to post signal panel (check channel permissions).");
+        return true;
       }
+
+      await respondEphemeral(interaction, `✅ Signal panel posted in <#${channelId}>.`);
+      return true;
+    } catch (err) {
+      console.error("signalroles handleInteraction error:", err);
+      await respondEphemeral(interaction, "❌ Signal roles encountered an error.");
       return true;
     }
-
-    if (!interaction.isChatInputCommand() || !["signals-panel", "signal-panel"].includes(interaction.commandName)) return false;
-
-    const sent = await ch.send({ embeds: [signalEmbed()], components: signalRows() }).catch(() => null);
-    if (!sent) {
-      await interaction.reply({ content: "❌ Failed to post signal panel (check channel permissions).", ephemeral: true }).catch(() => {});
-      return true;
-    }
-
-    const sent = await ch.send({ embeds: [signalEmbed()], components: signalRows() }).catch(() => null);
-    if (!sent) {
-      await interaction.reply({ content: "❌ Failed to post signal panel (check channel permissions).", ephemeral: true }).catch(() => {});
-      return true;
-    }
-
-    const sent = await ch.send({ embeds: [signalEmbed()], components: signalRows() }).catch(() => null);
-    if (!sent) {
-      await interaction.reply({ content: "❌ Failed to post signal panel (check channel permissions).", ephemeral: true }).catch(() => {});
-      return true;
-    }
-
-    const sent = await ch.send({ embeds: [signalEmbed()], components: signalRows() }).catch(() => null);
-    if (!sent) {
-      await interaction.reply({ content: "❌ Failed to post signal panel (check channel permissions).", ephemeral: true }).catch(() => {});
-      return true;
-    }
-
-    await interaction.reply({ content: `✅ Signal panel posted in <#${channelId}>.`, ephemeral: true }).catch(() => {});
-    return true;
   }
 
   return { name: "signalroles", commands, handleInteraction };
