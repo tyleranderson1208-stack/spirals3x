@@ -1,7 +1,7 @@
 {
-  "name": "rustyreds-rhib-race-bot",
+  "name": "stellar-rhib-race-bot",
   "version": "1.0.0",
-  "description": "RUSTYREDS 3X RHIB race Discord bot",
+  "description": "STELLAR 3X RHIB race Discord bot",
   "main": "bot.js",
   "type": "commonjs",
   "scripts": {

@@ -50,8 +50,8 @@ function parseColor(input, fallback) {
 }
 
 function createEmbedPanelSystem(client, commandsDef = [], opts = {}) {
-  const BRAND = opts.BRAND || "🌀 SPIRALS 3X";
-  const FOOTER = opts.FOOTER || "🌀 SPIRALS 3X";
+  const BRAND = opts.BRAND || ":blackhole: STELLAR 3X";
+  const FOOTER = opts.FOOTER || ":blackhole: STELLAR 3X";
   const COLOR_ACCENT = opts.COLOR_ACCENT ?? 0xb100ff;
   const DATA_DIR = opts.DATA_DIR || path.join(__dirname, "data");
 

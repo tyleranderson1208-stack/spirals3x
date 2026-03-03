@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * 🌀 SPIRALS 3X — Wipe Schedule Panel + Map Vote (Monthly / Manual)
+ * :blackhole: STELLAR 3X — Wipe Schedule Panel + Map Vote (Monthly / Manual)
  *
  * What you get:
  * - A "Wipe Schedule Panel" embed that shows:
@@ -46,7 +46,7 @@ const { createStaffPanelEmbed } = require("./staffinfo");
 const { DEFAULT_STATS_CATEGORY_ID, createWipeStatsTools } = require("./wipestats");
 
 // ---------------- THEME ----------------
-const BRAND = "🌀 SPIRALS 3X";
+const BRAND = ":blackhole: STELLAR 3X";
 const COLOR_PRIMARY = 0xb100ff; // premium purple
 const COLOR_ACCENT = 0x00e5ff; // neon cyan
 const PANEL_BLURB = "Clean wipe operations, rotation clarity, and vote control in one panel.";
@@ -221,7 +221,7 @@ function createWipeMapSystem(client) {
 
   const FOOTER =
     process.env.WIPEMAP_FOOTER ||
-    "Spirals 3X • Monthly wipe • Map vote updates the panel • Premium systems online";
+    "Stellar 3X • Monthly wipe • Map vote updates the panel • Premium systems online";
 
   // Auto-lock vote before wipe (seconds)
   const AUTOLOCK_BEFORE_WIPE_SEC = envInt(process.env.WIPEMAP_AUTOLOCK_BEFORE_WIPE_SEC, 60 * 60); // 1h default
@@ -345,7 +345,231 @@ Next: ${timelineNext}`, inline: false },
     const msg = await ch.messages.fetch(panelMessageId).catch(() => null);
     if (!msg) return;
 
-    await msg.edit({ embeds: [panelEmbed()] }).catch(() => {});
+    await msg.edit({ embeds: [panelEmbed(), staffEmbed()] }).catch(() => {});
+  }
+
+
+  async function refreshStaffPanel() {
+    const { staffPanelChannelId, staffPanelMessageId } = data.config;
+    if (!staffPanelChannelId || !staffPanelMessageId) return;
+
+    const ch = await getTextChannel(client, staffPanelChannelId);
+    if (!ch || !("messages" in ch)) return;
+
+    const msg = await ch.messages.fetch(staffPanelMessageId).catch(() => null);
+    if (!msg) return;
+
+    await msg.edit({ embeds: [staffEmbed()] }).catch(() => {});
+  }
+
+
+  async function refreshStaffPanel() {
+    const { staffPanelChannelId, staffPanelMessageId } = data.config;
+    if (!staffPanelChannelId || !staffPanelMessageId) return;
+
+    const ch = await getTextChannel(client, staffPanelChannelId);
+    if (!ch || !("messages" in ch)) return;
+
+    const msg = await ch.messages.fetch(staffPanelMessageId).catch(() => null);
+    if (!msg) return;
+
+    await msg.edit({ embeds: [staffEmbed()] }).catch(() => {});
+  }
+
+
+  async function refreshStaffPanel() {
+    const { staffPanelChannelId, staffPanelMessageId } = data.config;
+    if (!staffPanelChannelId || !staffPanelMessageId) return;
+
+    const ch = await getTextChannel(client, staffPanelChannelId);
+    if (!ch || !("messages" in ch)) return;
+
+    const msg = await ch.messages.fetch(staffPanelMessageId).catch(() => null);
+    if (!msg) return;
+
+    await msg.edit({ embeds: [staffEmbed()] }).catch(() => {});
+  }
+
+
+  async function refreshStaffPanel() {
+    const { staffPanelChannelId, staffPanelMessageId } = data.config;
+    if (!staffPanelChannelId || !staffPanelMessageId) return;
+
+    const ch = await getTextChannel(client, staffPanelChannelId);
+    if (!ch || !("messages" in ch)) return;
+
+    const msg = await ch.messages.fetch(staffPanelMessageId).catch(() => null);
+    if (!msg) return;
+
+    await msg.edit({ embeds: [staffEmbed()] }).catch(() => {});
+  }
+
+
+  async function refreshStaffPanel() {
+    const { staffPanelChannelId, staffPanelMessageId } = data.config;
+    if (!staffPanelChannelId || !staffPanelMessageId) return;
+
+    const ch = await getTextChannel(client, staffPanelChannelId);
+    if (!ch || !("messages" in ch)) return;
+
+    const msg = await ch.messages.fetch(staffPanelMessageId).catch(() => null);
+    if (!msg) return;
+
+    await msg.edit({ embeds: [staffEmbed()] }).catch(() => {});
+  }
+
+
+  async function refreshStaffPanel() {
+    const { staffPanelChannelId, staffPanelMessageId } = data.config;
+    if (!staffPanelChannelId || !staffPanelMessageId) return;
+
+    const ch = await getTextChannel(client, staffPanelChannelId);
+    if (!ch || !("messages" in ch)) return;
+
+    const msg = await ch.messages.fetch(staffPanelMessageId).catch(() => null);
+    if (!msg) return;
+
+    await msg.edit({ embeds: [staffEmbed()] }).catch(() => {});
+  }
+
+
+  async function refreshStaffPanel() {
+    const { staffPanelChannelId, staffPanelMessageId } = data.config;
+    if (!staffPanelChannelId || !staffPanelMessageId) return;
+
+    const ch = await getTextChannel(client, staffPanelChannelId);
+    if (!ch || !("messages" in ch)) return;
+
+    const msg = await ch.messages.fetch(staffPanelMessageId).catch(() => null);
+    if (!msg) return;
+
+    await msg.edit({ embeds: [staffEmbed()] }).catch(() => {});
+  }
+
+
+  async function refreshStaffPanel() {
+    const { staffPanelChannelId, staffPanelMessageId } = data.config;
+    if (!staffPanelChannelId || !staffPanelMessageId) return;
+
+    const ch = await getTextChannel(client, staffPanelChannelId);
+    if (!ch || !("messages" in ch)) return;
+
+    const msg = await ch.messages.fetch(staffPanelMessageId).catch(() => null);
+    if (!msg) return;
+
+    await msg.edit({ embeds: [staffEmbed()] }).catch(() => {});
+  }
+
+
+  async function refreshStaffPanel() {
+    const { staffPanelChannelId, staffPanelMessageId } = data.config;
+    if (!staffPanelChannelId || !staffPanelMessageId) return;
+
+    const ch = await getTextChannel(client, staffPanelChannelId);
+    if (!ch || !("messages" in ch)) return;
+
+    const msg = await ch.messages.fetch(staffPanelMessageId).catch(() => null);
+    if (!msg) return;
+
+    await msg.edit({ embeds: [staffEmbed()] }).catch(() => {});
+  }
+
+
+  async function refreshStaffPanel() {
+    const { staffPanelChannelId, staffPanelMessageId } = data.config;
+    if (!staffPanelChannelId || !staffPanelMessageId) return;
+
+    const ch = await getTextChannel(client, staffPanelChannelId);
+    if (!ch || !("messages" in ch)) return;
+
+    const msg = await ch.messages.fetch(staffPanelMessageId).catch(() => null);
+    if (!msg) return;
+
+    await msg.edit({ embeds: [staffEmbed()] }).catch(() => {});
+  }
+
+
+  async function refreshStaffPanel() {
+    const { staffPanelChannelId, staffPanelMessageId } = data.config;
+    if (!staffPanelChannelId || !staffPanelMessageId) return;
+
+    const ch = await getTextChannel(client, staffPanelChannelId);
+    if (!ch || !("messages" in ch)) return;
+
+    const msg = await ch.messages.fetch(staffPanelMessageId).catch(() => null);
+    if (!msg) return;
+
+    await msg.edit({ embeds: [staffEmbed()] }).catch(() => {});
+  }
+
+
+  async function refreshStaffPanel() {
+    const { staffPanelChannelId, staffPanelMessageId } = data.config;
+    if (!staffPanelChannelId || !staffPanelMessageId) return;
+
+    const ch = await getTextChannel(client, staffPanelChannelId);
+    if (!ch || !("messages" in ch)) return;
+
+    const msg = await ch.messages.fetch(staffPanelMessageId).catch(() => null);
+    if (!msg) return;
+
+    await msg.edit({ embeds: [staffEmbed()] }).catch(() => {});
+  }
+
+
+  async function refreshStaffPanel() {
+    const { staffPanelChannelId, staffPanelMessageId } = data.config;
+    if (!staffPanelChannelId || !staffPanelMessageId) return;
+
+    const ch = await getTextChannel(client, staffPanelChannelId);
+    if (!ch || !("messages" in ch)) return;
+
+    const msg = await ch.messages.fetch(staffPanelMessageId).catch(() => null);
+    if (!msg) return;
+
+    await msg.edit({ embeds: [staffEmbed()] }).catch(() => {});
+  }
+
+
+  async function refreshStaffPanel() {
+    const { staffPanelChannelId, staffPanelMessageId } = data.config;
+    if (!staffPanelChannelId || !staffPanelMessageId) return;
+
+    const ch = await getTextChannel(client, staffPanelChannelId);
+    if (!ch || !("messages" in ch)) return;
+
+    const msg = await ch.messages.fetch(staffPanelMessageId).catch(() => null);
+    if (!msg) return;
+
+    await msg.edit({ embeds: [staffEmbed()] }).catch(() => {});
+  }
+
+
+  async function refreshStaffPanel() {
+    const { staffPanelChannelId, staffPanelMessageId } = data.config;
+    if (!staffPanelChannelId || !staffPanelMessageId) return;
+
+    const ch = await getTextChannel(client, staffPanelChannelId);
+    if (!ch || !("messages" in ch)) return;
+
+    const msg = await ch.messages.fetch(staffPanelMessageId).catch(() => null);
+    if (!msg) return;
+
+    await msg.edit({ embeds: [staffEmbed()] }).catch(() => {});
+  }
+
+
+  async function refreshStaffPanel() {
+    const { staffPanelChannelId, staffPanelMessageId } = data.config;
+    if (!staffPanelChannelId || !staffPanelMessageId) return;
+
+    const ch = await getTextChannel(client, staffPanelChannelId);
+    if (!ch || !("messages" in ch)) return;
+
+    const msg = await ch.messages.fetch(staffPanelMessageId).catch(() => null);
+    if (!msg) return;
+
+    await msg.edit({ embeds: [staffEmbed()] }).catch(() => {});
   }
 
 
@@ -452,7 +676,7 @@ Next: ${timelineNext}`, inline: false },
       .startThread({
         name: "🗺️ Map Previews",
         autoArchiveDuration: 1440,
-        reason: "Spirals 3X map previews",
+        reason: "Stellar 3X map previews",
       })
       .catch(() => null);
 
@@ -638,7 +862,7 @@ Next: ${timelineNext}`, inline: false },
       await ch
         .send({
           content: `${pingText()}💥 **WIPE IS LIVE NOW**`,
-          embeds: [make(`${BRAND} — WIPE NOW`, `**Wipe time:** <t:${next}:F>\n🌀 The Spiral resets.`)],
+          embeds: [make(`${BRAND} — WIPE NOW`, `**Wipe time:** <t:${next}:F>\n:blackhole: The Spiral resets.`)],
         })
         .catch(() => {});
     }
@@ -778,7 +1002,7 @@ Next: ${timelineNext}`, inline: false },
 
       if (name === "wipe-panel") {
         const ch = interaction.options.getChannel("channel", true);
-        const msg = await ch.send({ embeds: [panelEmbed()] });
+        const msg = await ch.send({ embeds: [panelEmbed(), staffEmbed()] });
 
         data.config.panelChannelId = ch.id;
         data.config.panelMessageId = msg.id;
