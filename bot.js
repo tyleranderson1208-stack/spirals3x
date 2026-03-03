@@ -1422,6 +1422,18 @@ function getEmbedPanelSingleton() {
 }
 var EMBEDPANEL = getEmbedPanelSingleton();
 
+/* ================== EMBED PANEL ================== */
+function getEmbedPanelSingleton() {
+  if (!globalThis.__SPIRALS_EMBEDPANEL__) {
+    globalThis.__SPIRALS_EMBEDPANEL__ = createEmbedPanelSystem(client, commandsDef, {
+      BRAND,
+      FOOTER,
+      COLOR_ACCENT,
+      DATA_DIR,
+    });
+  }
+  return globalThis.__SPIRALS_EMBEDPANEL__;
+}
 /* ================== SUGGESTIONS ================== */
 const SUGGESTIONS = createSuggestionSystem(client, commandsDef, {
   BRAND,
@@ -1484,6 +1496,8 @@ client.on("interactionCreate", async (interaction) => {
     if (await EMBEDPANEL.handleInteraction(interaction)) return;
 
     if (await EMBEDPANEL.handleInteraction(interaction)) return;
+
+    if (await getEmbedPanelSingleton().handleInteraction(interaction)) return;
 
     // ✅ Rules system (/rulesmenu + select + acknowledge)
     const handledByRules = await RULES.handleInteraction(interaction);
