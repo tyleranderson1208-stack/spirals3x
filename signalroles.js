@@ -73,11 +73,6 @@ function createSignalRolesSystem(client, commandsDef = []) {
       .setDescription("Post the SPIRALS signal roles panel (admin)")
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
       .addChannelOption((o) => o.setName("channel").setDescription("Where to post the signal panel").setRequired(false)),
-    new SlashCommandBuilder()
-      .setName("signal-panel")
-      .setDescription("Post the SPIRALS signal roles panel (admin)")
-      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-      .addChannelOption((o) => o.setName("channel").setDescription("Where to post the signal panel").setRequired(false)),
   ];
 
   if (Array.isArray(commandsDef)) commandsDef.push(...commands);
@@ -132,7 +127,7 @@ function createSignalRolesSystem(client, commandsDef = []) {
         return true;
       }
 
-      if (!interaction.isChatInputCommand() || !["signals-panel", "signal-panel"].includes(interaction.commandName)) return false;
+      if (!interaction.isChatInputCommand() || interaction.commandName !== "signals-panel") return false;
       if (!isAdmin(interaction)) {
         await respondEphemeral(interaction, "❌ Admin only.");
         return true;
