@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * SPIRALS 3X — Onboarding
+ * STELLAR 3X — Onboarding
  * - Welcome message on join (premium embed + optional GIF)
  * - Optional audit log post to an audit channel
  * - Auto-delete welcome message after X hours (default 24)
@@ -19,7 +19,7 @@ function buildWelcomeEmbed({ BRAND, COLOR_PRIMARY, member, guild, verificationCh
 
   return new EmbedBuilder()
     .setColor(COLOR_PRIMARY)
-    .setTitle("🌀 A New Presence Enters the Spiral")
+    .setTitle(":blackhole: A New Presence Enters the Spiral")
     .setDescription(
       `Welcome, **${member}**.\n\n` +
         `You are the **${memberCount}ᵗʰ** soul drawn into **${BRAND}**.\n\n` +
@@ -34,7 +34,7 @@ function buildAuditEmbed({ BRAND, FOOTER, COLOR_NEUTRAL, member }) {
   return new EmbedBuilder()
     .setColor(COLOR_NEUTRAL)
     .setTitle(`🧾 ${BRAND} — Join Audit`)
-    .setDescription(`🌀 Member joined: ${member} (\`${member.id}\`)`)
+    .setDescription(`:blackhole: Member joined: ${member} (\`${member.id}\`)`)
     .setFooter({ text: FOOTER })
     .setTimestamp();
 }
@@ -45,8 +45,8 @@ function parseIntSafe(v, fallback) {
 }
 
 function createOnboardingSystem(client, opts) {
-  const BRAND = opts?.brand || "🌀 SPIRALS 3X";
-  const FOOTER = opts?.footer || "🌀 SPIRALS 3X";
+  const BRAND = opts?.brand || ":blackhole: STELLAR 3X";
+  const FOOTER = opts?.footer || ":blackhole: STELLAR 3X";
 
   const COLOR_PRIMARY = opts?.colorPrimary ?? 0x00e5ff;
   const COLOR_ACCENT = opts?.colorAccent ?? 0xb100ff;

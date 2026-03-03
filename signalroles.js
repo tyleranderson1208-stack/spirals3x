@@ -10,9 +10,9 @@ const {
   ButtonStyle,
 } = require("discord.js");
 
-const BRAND = "🌀 SPIRALS 3X";
+const BRAND = ":blackhole: STELLAR 3X";
 const COLOR_PRIMARY = 0xb100ff;
-const UI_FOOTER = process.env.UI_FOOTER || "🌀 SPIRALS 3X • RHIB Racing";
+const UI_FOOTER = process.env.UI_FOOTER || ":blackhole: STELLAR 3X • RHIB Racing";
 const SIGNAL_BANNER_URL =
   process.env.SIGNAL_HUB_BANNER_URL ||
   "https://media.discordapp.net/attachments/1468941702801916045/1477090974139416748/3c4cd911-5998-4ab3-9116-276822e0c73b.png?ex=69a37fab&is=69a22e2b&hm=37a719fd1f44227f96d07f8e98302a6041074c96084002bc52de889a62ddf328&=&format=webp&quality=lossless&width=385&height=257";
@@ -70,12 +70,7 @@ function createSignalRolesSystem(client, commandsDef = []) {
   const commands = [
     new SlashCommandBuilder()
       .setName("signals-panel")
-      .setDescription("Post the SPIRALS signal roles panel (admin)")
-      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-      .addChannelOption((o) => o.setName("channel").setDescription("Where to post the signal panel").setRequired(false)),
-    new SlashCommandBuilder()
-      .setName("signal-panel")
-      .setDescription("Post the SPIRALS signal roles panel (admin)")
+      .setDescription("Post the STELLAR signal roles panel (admin)")
       .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
       .addChannelOption((o) => o.setName("channel").setDescription("Where to post the signal panel").setRequired(false)),
   ];
@@ -132,7 +127,7 @@ function createSignalRolesSystem(client, commandsDef = []) {
         return true;
       }
 
-      if (!interaction.isChatInputCommand() || !["signals-panel", "signal-panel"].includes(interaction.commandName)) return false;
+      if (!interaction.isChatInputCommand() || interaction.commandName !== "signals-panel") return false;
       if (!isAdmin(interaction)) {
         await respondEphemeral(interaction, "❌ Admin only.");
         return true;

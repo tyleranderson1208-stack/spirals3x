@@ -1,7 +1,7 @@
 "use strict";
 
 /**
- * SPIRALS Suggestions System (v1)
+ * STELLAR Suggestions System (v1)
  * - Premium panel embed + button
  * - Modal submission by anyone
  * - Suggestion posts (bot-only) + thread per suggestion (auto-archive 3 days)
@@ -73,8 +73,8 @@ function safeInt(x, fallback = 0) {
 
 // ---------- Factory ----------
 function createSuggestionSystem(client, commandsDef, opts = {}) {
-  const BRAND = opts.BRAND || "🌀 SPIRALS 3X";
-  const FOOTER = opts.FOOTER || "🌀 SPIRALS 3X • Community Ideas";
+  const BRAND = opts.BRAND || ":blackhole: STELLAR 3X";
+  const FOOTER = opts.FOOTER || ":blackhole: STELLAR 3X • Community Ideas";
   const COLOR_PRIMARY = opts.COLOR_PRIMARY ?? 0x00e5ff;
   const COLOR_ACCENT = opts.COLOR_ACCENT ?? 0xb100ff;
   const COLOR_NEUTRAL = opts.COLOR_NEUTRAL ?? 0x0a1020;
@@ -309,7 +309,7 @@ function createSuggestionSystem(client, commandsDef, opts = {}) {
       .startThread({
         name: `${EMOJI} Suggestion #${String(id).padStart(3, "0")} • Discussion`,
         autoArchiveDuration: THREAD_AUTO_ARCHIVE_MIN, // 3 days
-        reason: "SPIRALS Suggestions discussion thread",
+        reason: "STELLAR Suggestions discussion thread",
       })
       .catch(() => null);
 

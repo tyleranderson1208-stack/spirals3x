@@ -1,6 +1,6 @@
-RUSTYREDS 3X • RHIB Race Bot
+STELLAR 3X • RHIB Race Bot
 
-A Discord bot for the RUSTYREDS 3X RHIB racing game with tiers, achievements, party lobbies, Kaos payouts, and seasonal stats.
+A Discord bot for the STELLAR 3X RHIB racing game with tiers, achievements, party lobbies, Kaos payouts, and seasonal stats.
 
 ## Setup
 
@@ -20,7 +20,7 @@ The bot now includes a fully customizable giveaway module with:
 
 ```env
 # Existing global footer is reused in giveaway embeds
-UI_FOOTER=🌀 SPIRALS 3X • Premium Systems
+UI_FOOTER=:blackhole: STELLAR 3X • Premium Systems
 ```
 
 > Giveaway channels/roles are configured in Discord with `/giveaway-setup`.
