@@ -21,7 +21,7 @@ function createRulesMenuSystem(client) {
     UI_FOOTER,
   } = process.env;
 
-  const FOOTER = UI_FOOTER || "🌀 SPIRALS 3X";
+  const FOOTER = UI_FOOTER || ":blackhole: STELLAR 3X";
   const ACK_VERSION = RULES_ACK_VERSION || "v1";
 
   // ========= STORAGE =========
@@ -107,13 +107,13 @@ function createRulesMenuSystem(client) {
 
   function premiumRulesEmbed(kind) {
     const isServer = kind === "server";
-    const title = isServer ? "🌀 SPIRALS — Server Rules" : "🌀 SPIRALS — Discord Rules";
+    const title = isServer ? ":blackhole: STELLAR — Server Rules" : ":blackhole: STELLAR — Discord Rules";
     const blocks = (isServer ? SERVER_RULES : DISCORD_RULES)
       .map((r) => `**${r.title}**\n${r.body}`)
       .join("\n\n");
 
     return new EmbedBuilder()
-      .setColor(0xb100ff) // Spirals accent purple (matches your bot theme)
+      .setColor(0xb100ff) // Stellar accent purple (matches your bot theme)
       .setTitle(title)
       .setDescription(
         `**Read carefully.** These rules apply at all times.\n\n${blocks}\n\n` +
@@ -124,10 +124,10 @@ function createRulesMenuSystem(client) {
 
   function mainMenuEmbed() {
     return new EmbedBuilder()
-      .setColor(0x00e5ff) // Spirals cyan
-      .setTitle("🌀 SPIRALS — Rules & Acknowledgement")
+      .setColor(0x00e5ff) // Stellar cyan
+      .setTitle(":blackhole: STELLAR — Rules & Acknowledgement")
       .setDescription(
-        `Welcome to **SPIRALS**.\n\n` +
+        `Welcome to **STELLAR**.\n\n` +
           `To keep the server clean, fair, and premium — you must review the rules and acknowledge them.\n\n` +
           `**Choose a ruleset below:**\n` +
           `• **Server Rules** (in-game)\n` +
@@ -166,7 +166,7 @@ function createRulesMenuSystem(client) {
   const commands = [
     new SlashCommandBuilder()
       .setName("rulesmenu")
-      .setDescription("Post the SPIRALS rules & acknowledgement menu (mods/admins only)."),
+      .setDescription("Post the STELLAR rules & acknowledgement menu (mods/admins only)."),
   ];
 
   // ========= HELPERS =========

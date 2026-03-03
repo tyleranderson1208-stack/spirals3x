@@ -33,9 +33,9 @@ const {
 process.on("unhandledRejection", (reason) => console.error("Unhandled rejection:", reason));
 process.on("uncaughtException", (err) => console.error("Uncaught exception:", err));
 
-// ================== BRAND (SPIRALS) ==================
-const BRAND = "🌀 SPIRALS 3X";
-const CURRENCY_NAME = "Spirals"; // display only (Kaos uses POINTS)
+// ================== BRAND (STELLAR) ==================
+const BRAND = ":blackhole: STELLAR 3X";
+const CURRENCY_NAME = "Stellar"; // display only (Kaos uses POINTS)
 
 // Neon palette (cyan + purple)
 const COLOR_PRIMARY = 0x00e5ff; // neon cyan
@@ -44,8 +44,8 @@ const COLOR_DARK = 0x050012; // deep dark purple
 const COLOR_NEUTRAL = 0x0a1020; // dark blue-neutral
 
 // Customizable footer via .env
-// UI_FOOTER=🌀 SPIRALS 3X • RHIB Racing
-const FOOTER = process.env.UI_FOOTER || "🌀 SPIRALS 3X • RHIB Racing";
+// UI_FOOTER=:blackhole: STELLAR 3X • RHIB Racing
+const FOOTER = process.env.UI_FOOTER || ":blackhole: STELLAR 3X • RHIB Racing";
 
 // Deploy commands toggle (recommended live: false)
 const DEPLOY_COMMANDS = (process.env.DEPLOY_COMMANDS || "false").toLowerCase() === "true";
@@ -500,7 +500,7 @@ function achievementsSummary(userId) {
 
 // ================== CINEMATIC LAUNCH ==================
 async function cinematicLaunch(interaction, title) {
-  await interaction.reply({ content: `🌀 ${title}`, ephemeral: true });
+  await interaction.reply({ content: `:blackhole: ${title}`, ephemeral: true });
   for (const line of CINEMATIC) {
     await new Promise((r) => setTimeout(r, 520));
     await interaction.editReply({ content: line });
@@ -1335,7 +1335,7 @@ const commandsDef = [
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 ];
 
-// 🌀 Wipe Panel + Map Vote
+// :blackhole: Wipe Panel + Map Vote
 const WIPEMAP = createWipeMapSystem(client);
 commandsDef.push(...WIPEMAP.commands);
 
@@ -1372,13 +1372,8 @@ const GIVEAWAYS = createGiveawaySystem(client, commandsDef, {
   DATA_DIR,
 });
 
-/* ================== EMBED PANEL ================== */
-const EMBEDPANEL = createEmbedPanelSystem(client, commandsDef, {
-  BRAND,
-  FOOTER,
-  COLOR_ACCENT,
-  DATA_DIR,
-});
+/* ================== SIGNAL ROLES ================== */
+const SIGNALROLES = createSignalRolesSystem(client, commandsDef);
 
 /* ================== EMBED PANEL ================== */
 const EMBEDPANEL = createEmbedPanelSystem(client, commandsDef, {
@@ -1387,53 +1382,6 @@ const EMBEDPANEL = createEmbedPanelSystem(client, commandsDef, {
   COLOR_ACCENT,
   DATA_DIR,
 });
-
-/* ================== EMBED PANEL ================== */
-const EMBEDPANEL = createEmbedPanelSystem(client, commandsDef, {
-  BRAND,
-  FOOTER,
-  COLOR_ACCENT,
-  DATA_DIR,
-});
-
-/* ================== EMBED PANEL ================== */
-var EMBEDPANEL = globalThis.__SPIRALS_EMBEDPANEL__;
-if (!EMBEDPANEL) {
-  EMBEDPANEL = createEmbedPanelSystem(client, commandsDef, {
-    BRAND,
-    FOOTER,
-    COLOR_ACCENT,
-    DATA_DIR,
-  });
-  globalThis.__SPIRALS_EMBEDPANEL__ = EMBEDPANEL;
-}
-
-/* ================== EMBED PANEL ================== */
-function getEmbedPanelSingleton() {
-  if (!globalThis.__SPIRALS_EMBEDPANEL__) {
-    globalThis.__SPIRALS_EMBEDPANEL__ = createEmbedPanelSystem(client, commandsDef, {
-      BRAND,
-      FOOTER,
-      COLOR_ACCENT,
-      DATA_DIR,
-    });
-  }
-  return globalThis.__SPIRALS_EMBEDPANEL__;
-}
-var EMBEDPANEL = getEmbedPanelSingleton();
-
-/* ================== EMBED PANEL ================== */
-function getEmbedPanelSingleton() {
-  if (!globalThis.__SPIRALS_EMBEDPANEL__) {
-    globalThis.__SPIRALS_EMBEDPANEL__ = createEmbedPanelSystem(client, commandsDef, {
-      BRAND,
-      FOOTER,
-      COLOR_ACCENT,
-      DATA_DIR,
-    });
-  }
-  return globalThis.__SPIRALS_EMBEDPANEL__;
-}
 /* ================== SUGGESTIONS ================== */
 const SUGGESTIONS = createSuggestionSystem(client, commandsDef, {
   BRAND,
@@ -1487,17 +1435,9 @@ client.on("interactionCreate", async (interaction) => {
 
     if (await GIVEAWAYS.handleInteraction(interaction)) return;
 
-    if (await EMBEDPANEL.handleInteraction(interaction)) return;
+    if (await SIGNALROLES.handleInteraction(interaction)) return;
 
     if (await EMBEDPANEL.handleInteraction(interaction)) return;
-
-    if (await EMBEDPANEL.handleInteraction(interaction)) return;
-
-    if (await EMBEDPANEL.handleInteraction(interaction)) return;
-
-    if (await EMBEDPANEL.handleInteraction(interaction)) return;
-
-    if (await getEmbedPanelSingleton().handleInteraction(interaction)) return;
 
     // ✅ Rules system (/rulesmenu + select + acknowledge)
     const handledByRules = await RULES.handleInteraction(interaction);
