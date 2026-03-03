@@ -15,6 +15,7 @@ const { createMapVoteSystem } = require("./mapvote");
 const { createWipeMapSystem } = require("./mapvote");
 const { createGiveawaySystem } = require("./giveaways");
 const { createSignalRolesSystem } = require("./signalroles");
+const { createEmbedPanelSystem } = require("./embedpanel");
 
 const {
   Client,
@@ -1374,6 +1375,18 @@ const GIVEAWAYS = createGiveawaySystem(client, commandsDef, {
 /* ================== SIGNAL ROLES ================== */
 const SIGNALROLES = createSignalRolesSystem(client, commandsDef);
 
+/* ================== EMBED PANEL ================== */
+function getEmbedPanelSingleton() {
+  if (!globalThis.__SPIRALS_EMBEDPANEL__) {
+    globalThis.__SPIRALS_EMBEDPANEL__ = createEmbedPanelSystem(client, commandsDef, {
+      BRAND,
+      FOOTER,
+      COLOR_ACCENT,
+      DATA_DIR,
+    });
+  }
+  return globalThis.__SPIRALS_EMBEDPANEL__;
+}
 /* ================== SUGGESTIONS ================== */
 const SUGGESTIONS = createSuggestionSystem(client, commandsDef, {
   BRAND,
@@ -1405,6 +1418,7 @@ client.once("ready", async () => {
   ONBOARDING.register();
   WIPEMAP.onReady();
   GIVEAWAYS.onReady();
+  getEmbedPanelSingleton().onReady();
 
   // intent sanity check (giveall needs member fetch)
   try {
@@ -1427,6 +1441,8 @@ client.on("interactionCreate", async (interaction) => {
     if (await GIVEAWAYS.handleInteraction(interaction)) return;
 
     if (await SIGNALROLES.handleInteraction(interaction)) return;
+
+    if (await getEmbedPanelSingleton().handleInteraction(interaction)) return;
 
     // ✅ Rules system (/rulesmenu + select + acknowledge)
     const handledByRules = await RULES.handleInteraction(interaction);
